@@ -52,6 +52,8 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(newStopCmd())
 	cmd.AddCommand(newRestartCmd())
 	cmd.AddCommand(newInitCmd())
+	cmd.AddCommand(newLogsCmd())
+	cmd.AddCommand(newLogSaveCmd())
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "version",

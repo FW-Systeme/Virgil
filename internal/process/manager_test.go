@@ -3,6 +3,8 @@ package process
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/chris576/vigil/internal/nginx"
@@ -62,6 +64,18 @@ func (m *mockSystemd) Reload(ctx context.Context) error {
 	return m.err
 }
 func (m *mockSystemd) Close() error { return nil }
+func (m *mockSystemd) Logs(ctx context.Context, name string, lines int, follow bool) (io.ReadCloser, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (m *mockSystemd) SetupLogging(ctx context.Context, name string, logPath string, maxSize string, rotate int) error {
+	return m.err
+}
+func (m *mockSystemd) RemoveLogging(ctx context.Context, name string) error {
+	return m.err
+}
 
 type mockNginx struct {
 	nginx.Client
@@ -91,6 +105,19 @@ func (m *mockNginx) Reload(ctx context.Context) error {
 	return m.err
 }
 func (m *mockNginx) Close() error { return nil }
+func (m *mockNginx) LogFile(name string) string { return "" }
+func (m *mockNginx) Logs(ctx context.Context, name string, lines int, follow bool) (io.ReadCloser, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (m *mockNginx) SetupLogging(name string, logPath string, maxSize string, rotate int) error {
+	return m.err
+}
+func (m *mockNginx) RemoveLogging(name string) error {
+	return m.err
+}
 
 type mockStore struct {
 	Store
@@ -659,5 +686,130 @@ func TestManager_AddProcess_NginxEnableError(t *testing.T) {
 	m := New(store, nil, ng)
 	p := Process{Name: "test", Type: TypeStatic, Port: 8080, BuildDir: "./dist"}
 	err := m.AddProcess(context.Background(), p, false)
+	require.Error(t, err)
+}
+
+func TestManager_Logs_Node(t *testing.T) {
+	sd := &mockSystemd{}
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{"svc": {Name: "svc", Type: TypeNode}}}
+	m := New(store, sd, ng)
+
+	r, err := m.Logs(context.Background(), "svc", 50, false)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	r.Close()
+}
+
+func TestManager_Logs_Static(t *testing.T) {
+	sd := &mockSystemd{}
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{"site": {Name: "site", Type: TypeStatic}}}
+	m := New(store, sd, ng)
+
+	r, err := m.Logs(context.Background(), "site", 10, false)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	r.Close()
+}
+
+func TestManager_Logs_UnknownType(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: "unknown"}}}
+	m := New(store, nil, nil)
+	_, err := m.Logs(context.Background(), "x", 10, false)
+	require.Error(t, err)
+}
+
+func TestManager_Logs_NilSystemd(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: TypeNode}}}
+	m := New(store, nil, &mockNginx{})
+	_, err := m.Logs(context.Background(), "x", 10, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "systemd client not available")
+}
+
+func TestManager_Logs_NilNginx(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: TypeStatic}}}
+	m := New(store, &mockSystemd{}, nil)
+	_, err := m.Logs(context.Background(), "x", 10, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nginx client not available")
+}
+
+func TestManager_SetupLogging_Node(t *testing.T) {
+	sd := &mockSystemd{}
+	store := &mockStore{processes: map[string]Process{"svc": {Name: "svc", Type: TypeNode}}}
+	m := New(store, sd, &mockNginx{})
+
+	err := m.SetupLogging(context.Background(), "svc", "/var/log/svc.log", "10M", 3)
+	require.NoError(t, err)
+}
+
+func TestManager_SetupLogging_Static(t *testing.T) {
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{"site": {Name: "site", Type: TypeStatic}}}
+	m := New(store, &mockSystemd{}, ng)
+
+	err := m.SetupLogging(context.Background(), "site", "/var/log/site.log", "10M", 3)
+	require.NoError(t, err)
+}
+
+func TestManager_SetupLogging_UnknownType(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: "unknown"}}}
+	m := New(store, nil, nil)
+	err := m.SetupLogging(context.Background(), "x", "/var/log/x.log", "10M", 3)
+	require.Error(t, err)
+}
+
+func TestManager_SetupLogging_NilSystemd(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: TypeNode}}}
+	m := New(store, nil, &mockNginx{})
+	err := m.SetupLogging(context.Background(), "x", "/var/log/x.log", "10M", 3)
+	require.Error(t, err)
+}
+
+func TestManager_SetupLogging_NilNginx(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: TypeStatic}}}
+	m := New(store, &mockSystemd{}, nil)
+	err := m.SetupLogging(context.Background(), "x", "/var/log/x.log", "10M", 3)
+	require.Error(t, err)
+}
+
+func TestManager_RemoveLogging_Node(t *testing.T) {
+	sd := &mockSystemd{}
+	store := &mockStore{processes: map[string]Process{"svc": {Name: "svc", Type: TypeNode}}}
+	m := New(store, sd, &mockNginx{})
+
+	err := m.RemoveLogging(context.Background(), "svc")
+	require.NoError(t, err)
+}
+
+func TestManager_RemoveLogging_Static(t *testing.T) {
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{"site": {Name: "site", Type: TypeStatic}}}
+	m := New(store, &mockSystemd{}, ng)
+
+	err := m.RemoveLogging(context.Background(), "site")
+	require.NoError(t, err)
+}
+
+func TestManager_RemoveLogging_UnknownType(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: "unknown"}}}
+	m := New(store, nil, nil)
+	err := m.RemoveLogging(context.Background(), "x")
+	require.Error(t, err)
+}
+
+func TestManager_RemoveLogging_NilSystemd(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: TypeNode}}}
+	m := New(store, nil, &mockNginx{})
+	err := m.RemoveLogging(context.Background(), "x")
+	require.Error(t, err)
+}
+
+func TestManager_RemoveLogging_NilNginx(t *testing.T) {
+	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: TypeStatic}}}
+	m := New(store, &mockSystemd{}, nil)
+	err := m.RemoveLogging(context.Background(), "x")
 	require.Error(t, err)
 }

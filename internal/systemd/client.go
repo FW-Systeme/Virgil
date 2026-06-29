@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/coreos/go-systemd/v22/dbus"
 )
@@ -13,6 +16,10 @@ import (
 var (
 	_        Client = (*client)(nil)
 	errNoConn       = errors.New("systemd dbus connection not available")
+
+	journalctlCmd = "journalctl"
+	systemctlCmd  = "systemctl"
+	logrotateDir  = "/etc/logrotate.d"
 )
 
 type client struct {
@@ -134,3 +141,138 @@ func (c *client) Close() error {
 	}
 	return nil
 }
+
+func (c *client) Logs(ctx context.Context, name string, lines int, follow bool) (io.ReadCloser, error) {
+	args := []string{"-u", name + ".service", "-o", "cat"}
+	if lines > 0 {
+		args = append(args, "-n", fmt.Sprintf("%d", lines))
+	}
+	if follow {
+		args = append(args, "-f")
+	}
+	cmd := exec.CommandContext(ctx, journalctlCmd, args...)
+	cmd.Stderr = nil
+	r, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating journalctl pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting journalctl: %w", err)
+	}
+	return r, nil
+}
+
+func (c *client) SetupLogging(ctx context.Context, name string, logPath, maxSize string, rotate int) error {
+	unit := unitPath(name)
+	data, err := os.ReadFile(unit)
+	if err != nil {
+		return fmt.Errorf("reading unit file: %w", err)
+	}
+	content := string(data)
+
+	if strings.Contains(content, "StandardOutput=") || strings.Contains(content, "StandardError=") {
+		return nil
+	}
+
+	lines := strings.Split(content, "\n")
+	serviceLine := -1
+	nextSectionLine := len(lines)
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "[Service]" {
+			serviceLine = i
+		} else if serviceLine >= 0 && strings.HasPrefix(trim, "[") {
+			nextSectionLine = i
+			break
+		}
+	}
+
+	var out []string
+	if serviceLine < 0 {
+		out = make([]string, 0, len(lines)+3)
+		out = append(out, lines...)
+		out = append(out, "[Service]",
+			"StandardOutput=append:"+logPath,
+			"StandardError=append:"+logPath)
+	} else {
+		for i, line := range lines {
+			if i == nextSectionLine {
+				out = append(out,
+					"StandardOutput=append:"+logPath,
+					"StandardError=append:"+logPath)
+			}
+			out = append(out, line)
+		}
+	}
+
+	if err := os.WriteFile(unit, []byte(strings.Join(out, "\n")), 0644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing unit file: %w", err)
+	}
+
+	if err := c.writeLogrotate(name, logPath, maxSize, rotate); err != nil {
+		return err
+	}
+
+	return c.reloadAndRestart(ctx, name)
+}
+
+func (c *client) RemoveLogging(ctx context.Context, name string) error {
+	unit := unitPath(name)
+	data, err := os.ReadFile(unit)
+	if err != nil {
+		return fmt.Errorf("reading unit file: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var cleaned []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "StandardOutput=") || strings.HasPrefix(trimmed, "StandardError=") {
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+
+	if err := os.WriteFile(unit, []byte(strings.Join(cleaned, "\n")), 0644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing unit file: %w", err)
+	}
+
+	logrotatePath := filepath.Join(logrotateDir, "vigil-"+name)
+	if err := os.Remove(logrotatePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing logrotate config: %w", err)
+	}
+
+	return c.reloadAndRestart(ctx, name)
+}
+
+func (c *client) writeLogrotate(name, logPath, maxSize string, rotate int) error {
+	content := fmt.Sprintf(`%s {
+	size %s
+	rotate %d
+	compress
+	missingok
+	notifempty
+	copytruncate
+}
+`, logPath, maxSize, rotate)
+
+	path := filepath.Join(logrotateDir, "vigil-"+name)
+	if err := os.MkdirAll(logrotateDir, 0755); err != nil {
+		return fmt.Errorf("creating logrotate dir: %w", err)
+	}
+	return os.WriteFile(path, []byte(content), 0644) //nolint:gosec
+}
+
+func (c *client) reloadAndRestart(ctx context.Context, name string) error {
+	reload := exec.CommandContext(ctx, systemctlCmd, "daemon-reload")                          //nolint:gosec
+	if out, err := reload.CombinedOutput(); err != nil {
+		return fmt.Errorf("daemon-reload failed: %w\n%s", err, string(out))
+	}
+	restart := exec.CommandContext(ctx, systemctlCmd, "restart", name+".service")              //nolint:gosec
+	if out, err := restart.CombinedOutput(); err != nil {
+		return fmt.Errorf("restart failed: %w\n%s", err, string(out))
+	}
+	return nil
+}
+
+

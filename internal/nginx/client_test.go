@@ -39,7 +39,7 @@ func TestConfigTemplate(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, configData{Port: 8080, Domain: "example.com", Root: "/var/www"})
+	err = tmpl.Execute(&buf, configData{Port: 8080, Domain: "example.com", Root: "/var/www", Name: "myapp"})
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -47,6 +47,7 @@ func TestConfigTemplate(t *testing.T) {
 	assert.Contains(t, output, "server_name example.com;")
 	assert.Contains(t, output, "root /var/www;")
 	assert.Contains(t, output, "index index.html;")
+	assert.Contains(t, output, "access_log /var/log/nginx/myapp.access.log;")
 }
 
 // setupTempDirs creates temp dirs mimicking /etc/nginx structure.
@@ -334,4 +335,68 @@ func TestPaths_default(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestLogFile(t *testing.T) {
+	t.Parallel()
+	c := &client{}
+	path := c.LogFile("my-site")
+	assert.Equal(t, "/var/log/nginx/my-site.access.log", path)
+}
+
+func TestLogs_NilReceiver(t *testing.T) {
+	t.Parallel()
+	c := &client{}
+	r, err := c.Logs(context.Background(), "test", 10, false)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	r.Close()
+}
+
+func TestSetupLogging_CreatesLogrotate(t *testing.T) {
+	dir := t.TempDir()
+	orig := logrotateDir
+	logrotateDir = dir
+	defer func() { logrotateDir = orig }()
+
+	c := &client{}
+	err := c.SetupLogging("my-app", "/var/log/nginx/my-app.access.log", "10M", 3)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "vigil-my-app"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "/var/log/nginx/my-app.access.log")
+	assert.Contains(t, content, "size 10M")
+	assert.Contains(t, content, "rotate 3")
+	assert.Contains(t, content, "compress")
+}
+
+func TestRemoveLogging_RemovesLogrotate(t *testing.T) {
+	dir := t.TempDir()
+	orig := logrotateDir
+	logrotateDir = dir
+	defer func() { logrotateDir = orig }()
+
+	rotatePath := filepath.Join(dir, "vigil-my-app")
+	err := os.WriteFile(rotatePath, []byte("old config"), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.RemoveLogging("my-app")
+	require.NoError(t, err)
+
+	_, err = os.Stat(rotatePath)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestRemoveLogging_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	orig := logrotateDir
+	logrotateDir = dir
+	defer func() { logrotateDir = orig }()
+
+	c := &client{}
+	err := c.RemoveLogging("ghost")
+	require.NoError(t, err)
 }

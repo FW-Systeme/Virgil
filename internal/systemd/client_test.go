@@ -3,6 +3,7 @@ package systemd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,4 +156,245 @@ func TestClient_jobWait_NilConn(t *testing.T) {
 			return 0, errNoConn
 		})
 	})
+}
+
+func TestLogs_NilConn(t *testing.T) {
+	orig := journalctlCmd
+	journalctlCmd = "echo"
+	defer func() { journalctlCmd = orig }()
+
+	c := &client{conn: nil}
+	r, err := c.Logs(context.Background(), "test-app", 50, false)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+	r.Close()
+}
+
+func TestLogs_Args(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "journalctl")
+	err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\""), 0755) //nolint:gosec
+	require.NoError(t, err)
+
+	orig := journalctlCmd
+	journalctlCmd = script
+	defer func() { journalctlCmd = orig }()
+
+	c := &client{}
+
+	t.Run("default no lines no follow", func(t *testing.T) {
+		r, err := c.Logs(context.Background(), "test-app", 0, false)
+		require.NoError(t, err)
+		data, readErr := io.ReadAll(r)
+		require.NoError(t, readErr)
+		r.Close()
+		args := string(data)
+		assert.Contains(t, args, "-u test-app.service")
+		assert.Contains(t, args, "-o cat")
+		assert.NotContains(t, args, "-n")
+		assert.NotContains(t, args, "-f")
+	})
+
+	t.Run("with lines", func(t *testing.T) {
+		r, err := c.Logs(context.Background(), "test-app", 50, false)
+		require.NoError(t, err)
+		data, readErr := io.ReadAll(r)
+		require.NoError(t, readErr)
+		r.Close()
+		args := string(data)
+		assert.Contains(t, args, "-u test-app.service")
+		assert.Contains(t, args, "-n 50")
+		assert.NotContains(t, args, "-f")
+	})
+
+	t.Run("with follow", func(t *testing.T) {
+		r, err := c.Logs(context.Background(), "test-app", 50, true)
+		require.NoError(t, err)
+		data, readErr := io.ReadAll(r)
+		require.NoError(t, readErr)
+		r.Close()
+		args := string(data)
+		assert.Contains(t, args, "-u test-app.service")
+		assert.Contains(t, args, "-n 50")
+		assert.Contains(t, args, "-f")
+	})
+}
+
+func TestSetupLogging_AddsDirectives(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	origSysctl := systemctlCmd
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = dir
+	systemctlCmd = "echo"
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+		systemctlCmd = origSysctl
+	}()
+
+	unitContent := `[Unit]
+Description=test
+
+[Service]
+ExecStart=/usr/bin/test
+
+[Install]
+WantedBy=multi-user.target
+`
+	err := os.WriteFile(filepath.Join(dir, "test-app.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.SetupLogging(context.Background(), "test-app", "/var/log/test.log", "10M", 3)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "test-app.service"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "StandardOutput=append:/var/log/test.log")
+	assert.Contains(t, content, "StandardError=append:/var/log/test.log")
+
+	rotateData, err := os.ReadFile(filepath.Join(dir, "vigil-test-app"))
+	require.NoError(t, err)
+	assert.Contains(t, string(rotateData), "/var/log/test.log")
+}
+
+func TestSetupLogging_NoServiceSection(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	origSysctl := systemctlCmd
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = dir
+	systemctlCmd = "echo"
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+		systemctlCmd = origSysctl
+	}()
+
+	unitContent := `[Unit]
+Description=test
+`
+	err := os.WriteFile(filepath.Join(dir, "missing-section.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.SetupLogging(context.Background(), "missing-section", "/var/log/test.log", "10M", 3)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "missing-section.service"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.Contains(t, content, "[Service]")
+	assert.Contains(t, content, "StandardOutput=append:/var/log/test.log")
+	assert.Contains(t, content, "StandardError=append:/var/log/test.log")
+}
+
+func TestSetupLogging_ExistingDirectives(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = dir
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+	}()
+
+	unitContent := `[Service]
+StandardOutput=journal
+StandardError=journal
+`
+	err := os.WriteFile(filepath.Join(dir, "already.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.SetupLogging(context.Background(), "already", "/var/log/test.log", "10M", 3)
+	require.NoError(t, err)
+
+	// Should not modify file
+	data, err := os.ReadFile(filepath.Join(dir, "already.service"))
+	require.NoError(t, err)
+	assert.Equal(t, unitContent, string(data))
+}
+
+func TestSetupLogging_NonExistentUnit(t *testing.T) {
+	c := &client{}
+	err := c.SetupLogging(context.Background(), "nonexistent", "/var/log/test.log", "10M", 3)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading unit file")
+}
+
+func TestRemoveLogging_RemovesDirectives(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	origSysctl := systemctlCmd
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = dir
+	systemctlCmd = "echo"
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+		systemctlCmd = origSysctl
+	}()
+
+	unitContent := `[Service]
+StandardOutput=append:/var/log/test.log
+StandardError=append:/var/log/test.log
+ExecStart=/usr/bin/test
+`
+	err := os.WriteFile(filepath.Join(dir, "test-app.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	rotatePath := filepath.Join(dir, "vigil-test-app")
+	err = os.WriteFile(rotatePath, []byte("logrotate content"), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.RemoveLogging(context.Background(), "test-app")
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "test-app.service"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.NotContains(t, content, "StandardOutput")
+	assert.NotContains(t, content, "StandardError")
+	assert.Contains(t, content, "ExecStart")
+
+	_, err = os.Stat(rotatePath)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestRemoveLogging_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	origSysctl := systemctlCmd
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = dir
+	systemctlCmd = "echo"
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+		systemctlCmd = origSysctl
+	}()
+
+	unitContent := `[Service]
+ExecStart=/usr/bin/test
+`
+	err := os.WriteFile(filepath.Join(dir, "clean.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.RemoveLogging(context.Background(), "clean")
+	require.NoError(t, err)
+
+	// Verify unit file unchanged
+	data, err := os.ReadFile(filepath.Join(dir, "clean.service"))
+	require.NoError(t, err)
+	assert.Equal(t, unitContent, string(data))
 }

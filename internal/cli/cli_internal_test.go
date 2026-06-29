@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/chris576/vigil/internal/nginx"
@@ -42,6 +44,18 @@ func (m *mockSystemd) CreateUnitFile(name string, content []byte) error { return
 func (m *mockSystemd) RemoveUnitFile(name string) error                 { return m.err }
 func (m *mockSystemd) Reload(ctx context.Context) error                 { return m.err }
 func (m *mockSystemd) Close() error                                    { return nil }
+func (m *mockSystemd) Logs(ctx context.Context, name string, lines int, follow bool) (io.ReadCloser, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (m *mockSystemd) SetupLogging(ctx context.Context, name string, logPath string, maxSize string, rotate int) error {
+	return m.err
+}
+func (m *mockSystemd) RemoveLogging(ctx context.Context, name string) error {
+	return m.err
+}
 
 type mockNginx struct {
 	nginx.Client
@@ -54,6 +68,19 @@ func (m *mockNginx) RemoveSiteConfig(name string) error                         
 func (m *mockNginx) SiteEnabled(name string) (bool, error)                       { return true, m.err }
 func (m *mockNginx) Reload(ctx context.Context) error                            { return m.err }
 func (m *mockNginx) Close() error                                                { return nil }
+func (m *mockNginx) LogFile(name string) string { return "" }
+func (m *mockNginx) Logs(ctx context.Context, name string, lines int, follow bool) (io.ReadCloser, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (m *mockNginx) SetupLogging(name string, logPath string, maxSize string, rotate int) error {
+	return m.err
+}
+func (m *mockNginx) RemoveLogging(name string) error {
+	return m.err
+}
 
 type mockStore struct {
 	process.Store
@@ -136,6 +163,8 @@ func TestHelp(t *testing.T) {
 	assert.Contains(t, out, "stop")
 	assert.Contains(t, out, "restart")
 	assert.Contains(t, out, "version")
+	assert.Contains(t, out, "logs")
+	assert.Contains(t, out, "logsave")
 }
 
 func TestVersion(t *testing.T) {
@@ -523,4 +552,88 @@ func TestList_WithDisabledApp(t *testing.T) {
 	out, err := executeWithPM(t, pm, []string{"list"})
 	require.NoError(t, err)
 	assert.Contains(t, out, "disabled")
+}
+
+func TestLogs_Help(t *testing.T) {
+	out, err := executeWithPM(t, testPM(), []string{"logs", "--help"})
+	require.NoError(t, err)
+	assert.Contains(t, out, "--lines")
+	assert.Contains(t, out, "--follow")
+	assert.Contains(t, out, "--output")
+}
+
+func TestLogs_MissingName(t *testing.T) {
+	_, err := executeWithPM(t, testPM(), []string{"logs"})
+	require.Error(t, err)
+}
+
+func TestLogs_Success(t *testing.T) {
+	pm := testPMWithProcesses(map[string]process.Process{
+		"my-app": {Name: "my-app", Type: process.TypeNode},
+	})
+	out, err := executeWithPM(t, pm, []string{"logs", "my-app"})
+	require.NoError(t, err)
+	// No error, output is empty since mock returns empty reader
+	assert.Empty(t, out)
+}
+
+func TestLogSave_Help(t *testing.T) {
+	out, err := executeWithPM(t, testPM(), []string{"logsave", "--help"})
+	require.NoError(t, err)
+	assert.Contains(t, out, "enable")
+	assert.Contains(t, out, "disable")
+	assert.Contains(t, out, "status")
+}
+
+func TestLogSave_Enable_Help(t *testing.T) {
+	out, err := executeWithPM(t, testPM(), []string{"logsave", "enable", "--help"})
+	require.NoError(t, err)
+	assert.Contains(t, out, "--max-size")
+	assert.Contains(t, out, "--output")
+	assert.Contains(t, out, "--rotate")
+}
+
+func TestLogSave_Enable_MissingName(t *testing.T) {
+	_, err := executeWithPM(t, testPM(), []string{"logsave", "enable"})
+	require.Error(t, err)
+}
+
+func TestLogSave_Disable_MissingName(t *testing.T) {
+	_, err := executeWithPM(t, testPM(), []string{"logsave", "disable"})
+	require.Error(t, err)
+}
+
+func TestLogSave_Status_MissingName(t *testing.T) {
+	_, err := executeWithPM(t, testPM(), []string{"logsave", "status"})
+	require.Error(t, err)
+}
+
+func TestLogs_NoPM(t *testing.T) {
+	cmd := newLogsCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"my-app"})
+	err := cmd.Execute()
+	require.Error(t, err)
+}
+
+func TestLogSaveEnable_NoPM(t *testing.T) {
+	cmd := newLogSaveEnableCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"my-app"})
+	err := cmd.Execute()
+	require.Error(t, err)
+}
+
+func TestLogSaveDisable_NoPM(t *testing.T) {
+	cmd := newLogSaveDisableCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"my-app"})
+	err := cmd.Execute()
+	require.Error(t, err)
 }

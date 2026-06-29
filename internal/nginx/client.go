@@ -3,12 +3,19 @@ package nginx
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"text/template"
 )
 
-var _ Client = (*client)(nil)
+var (
+	_            Client = (*client)(nil)
+	tailCmd             = "tail"
+	logrotateDir        = "/etc/logrotate.d"
+)
 
 type client struct{}
 
@@ -21,6 +28,7 @@ const configTemplate = `server {
 	server_name {{.Domain}};
 	root {{.Root}};
 	index index.html;
+	access_log /var/log/nginx/{{.Name}}.access.log;
 }
 `
 
@@ -28,6 +36,7 @@ type configData struct {
 	Port   int
 	Domain string
 	Root   string
+	Name   string
 }
 
 func (c *client) EnableSite(name string, port int, domain, root string) error {
@@ -41,7 +50,7 @@ func (c *client) EnableSite(name string, port int, domain, root string) error {
 	if err != nil {
 		return fmt.Errorf("enabling nginx site: creating config: %w", err)
 	}
-	if err := tmpl.Execute(f, configData{Port: port, Domain: domain, Root: root}); err != nil {
+	if err := tmpl.Execute(f, configData{Port: port, Domain: domain, Root: root, Name: name}); err != nil {
 		f.Close()
 		return fmt.Errorf("enabling nginx site: writing config: %w", err)
 	}
@@ -97,6 +106,77 @@ func (c *client) Reload(ctx context.Context) error {
 
 func (c *client) Close() error {
 	return nil
+}
+
+func (c *client) LogFile(name string) string {
+	return "/var/log/nginx/" + name + ".access.log"
+}
+
+func (c *client) Logs(ctx context.Context, name string, lines int, follow bool) (io.ReadCloser, error) {
+	path := c.LogFile(name)
+	if follow {
+		args := []string{"-f", "-n", strconv.Itoa(lines)}
+		cmd := exec.CommandContext(ctx, tailCmd, args...) //nolint:gosec
+		cmd.Args = append(cmd.Args, path)
+		r, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("creating tail pipe: %w", err)
+		}
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("starting tail: %w", err)
+		}
+		return r, nil
+	}
+
+	if lines <= 0 {
+		// cat entire file
+		cmd := exec.CommandContext(ctx, "cat", path) //nolint:gosec
+		r, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("creating cat pipe: %w", err)
+		}
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("starting cat: %w", err)
+		}
+		return r, nil
+	}
+
+	cmd := exec.CommandContext(ctx, tailCmd, "-n", strconv.Itoa(lines), path) //nolint:gosec
+	r, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating tail pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting tail: %w", err)
+	}
+	return r, nil
+}
+
+func (c *client) SetupLogging(name string, logPath string, maxSize string, rotate int) error {
+	content := fmt.Sprintf(`%s {
+	size %s
+	rotate %d
+	compress
+	missingok
+	notifempty
+	copytruncate
+}
+`, logPath, maxSize, rotate)
+
+	logrotatePath := filepath.Join(logrotateDir, "vigil-"+name)
+	if err := os.MkdirAll(logrotateDir, 0755); err != nil {
+		return fmt.Errorf("creating logrotate dir: %w", err)
+	}
+	return os.WriteFile(logrotatePath, []byte(content), 0644) //nolint:gosec
+}
+
+func (c *client) RemoveLogging(name string) error {
+	logrotatePath := filepath.Join(logrotateDir, "vigil-"+name)
+	err := os.Remove(logrotatePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 var availablePath = func(name string) string {
