@@ -47,13 +47,20 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Build binary
+      - name: Build binary (amd64)
         run: |
           go build -ldflags="-X main.version=${{ github.ref_name }}" \
-            -o vigil ./cmd/vigil
+            -o vigil-linux-amd64 ./cmd/vigil
+
+      - name: Build binary (arm64)
+        run: |
+          GOARCH=arm64 go build -ldflags="-X main.version=${{ github.ref_name }}" \
+            -o vigil-linux-arm64 ./cmd/vigil
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: vigil
+          files: |
+            vigil-linux-amd64
+            vigil-linux-arm64
           generate_release_notes: true
