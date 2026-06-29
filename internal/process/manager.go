@@ -22,13 +22,15 @@ func New(store Store, systemdClient systemd.Client, nginxClient nginx.Client) *M
 	}
 }
 
-func (m *Manager) AddProcess(ctx context.Context, p Process) error {
+func (m *Manager) AddProcess(ctx context.Context, p Process, force bool) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
 
-	if _, err := m.store.Load(p.Name); err == nil {
-		return fmt.Errorf("process %q already exists", p.Name)
+	if !force {
+		if _, err := m.store.Load(p.Name); err == nil {
+			return fmt.Errorf("process %q already exists", p.Name)
+		}
 	}
 
 	if err := m.store.Save(p); err != nil {
@@ -37,6 +39,9 @@ func (m *Manager) AddProcess(ctx context.Context, p Process) error {
 
 	switch p.Type {
 	case TypeNode:
+		if m.systemd == nil {
+			return fmt.Errorf("systemd client not available")
+		}
 		content := unitContent(p)
 		if err := m.systemd.CreateUnitFile(p.Name, content); err != nil {
 			return fmt.Errorf("creating systemd unit: %w", err)
@@ -48,6 +53,9 @@ func (m *Manager) AddProcess(ctx context.Context, p Process) error {
 			return fmt.Errorf("reloading systemd: %w", err)
 		}
 	case TypeStatic:
+		if m.nginx == nil {
+			return fmt.Errorf("nginx client not available")
+		}
 		if err := m.nginx.EnableSite(p.Name, p.Port, p.NginxDomain, p.NginxPath); err != nil {
 			return fmt.Errorf("enabling nginx site: %w", err)
 		}
@@ -67,6 +75,9 @@ func (m *Manager) RemoveProcess(ctx context.Context, name string) error {
 
 	switch p.Type {
 	case TypeNode:
+		if m.systemd == nil {
+			return fmt.Errorf("systemd client not available")
+		}
 		if err := m.systemd.StopUnit(ctx, name); err != nil {
 			return fmt.Errorf("stopping unit: %w", err)
 		}
@@ -80,6 +91,9 @@ func (m *Manager) RemoveProcess(ctx context.Context, name string) error {
 			return fmt.Errorf("reloading systemd: %w", err)
 		}
 	case TypeStatic:
+		if m.nginx == nil {
+			return fmt.Errorf("nginx client not available")
+		}
 		if err := m.nginx.DisableSite(name); err != nil {
 			return fmt.Errorf("disabling nginx site: %w", err)
 		}
@@ -114,11 +128,17 @@ func (m *Manager) StartProcess(ctx context.Context, name string) error {
 
 	switch p.Type {
 	case TypeNode:
+		if m.systemd == nil {
+			return fmt.Errorf("systemd client not available")
+		}
 		if err := m.systemd.StartUnit(ctx, name); err != nil {
 			return fmt.Errorf("starting unit: %w", err)
 		}
 		return nil
 	case TypeStatic:
+		if m.nginx == nil {
+			return fmt.Errorf("nginx client not available")
+		}
 		if err := m.nginx.EnableSite(p.Name, p.Port, p.NginxDomain, p.NginxPath); err != nil {
 			return fmt.Errorf("enabling nginx site: %w", err)
 		}
@@ -139,11 +159,17 @@ func (m *Manager) StopProcess(ctx context.Context, name string) error {
 
 	switch p.Type {
 	case TypeNode:
+		if m.systemd == nil {
+			return fmt.Errorf("systemd client not available")
+		}
 		if err := m.systemd.StopUnit(ctx, name); err != nil {
 			return fmt.Errorf("stopping unit: %w", err)
 		}
 		return nil
 	case TypeStatic:
+		if m.nginx == nil {
+			return fmt.Errorf("nginx client not available")
+		}
 		if err := m.nginx.DisableSite(name); err != nil {
 			return fmt.Errorf("disabling nginx site: %w", err)
 		}
@@ -164,11 +190,17 @@ func (m *Manager) RestartProcess(ctx context.Context, name string) error {
 
 	switch p.Type {
 	case TypeNode:
+		if m.systemd == nil {
+			return fmt.Errorf("systemd client not available")
+		}
 		if err := m.systemd.RestartUnit(ctx, name); err != nil {
 			return fmt.Errorf("restarting unit: %w", err)
 		}
 		return nil
 	case TypeStatic:
+		if m.nginx == nil {
+			return fmt.Errorf("nginx client not available")
+		}
 		if err := m.nginx.DisableSite(name); err != nil {
 			return fmt.Errorf("disabling nginx site: %w", err)
 		}
@@ -192,12 +224,18 @@ func (m *Manager) Status(ctx context.Context, name string) (activeState, subStat
 
 	switch p.Type {
 	case TypeNode:
+		if m.systemd == nil {
+			return "", "", fmt.Errorf("systemd client not available")
+		}
 		active, sub, err := m.systemd.UnitStatus(ctx, name)
 		if err != nil {
 			return "", "", fmt.Errorf("getting unit status: %w", err)
 		}
 		return active, sub, nil
 	case TypeStatic:
+		if m.nginx == nil {
+			return "", "", fmt.Errorf("nginx client not available")
+		}
 		enabled, err := m.nginx.SiteEnabled(name)
 		if err != nil {
 			return "", "", fmt.Errorf("checking nginx site: %w", err)

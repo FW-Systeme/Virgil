@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/chris576/vigil/internal/cli"
@@ -10,13 +9,9 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(version)
-		return
-	}
+	cli.SetVersion(version)
 
-	if err := cli.Run(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	if err := cli.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
