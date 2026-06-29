@@ -73,7 +73,9 @@ func (m *Manager) AddProcess(ctx context.Context, p Process, force bool) error {
 	}
 
 	if svcErr != nil {
-		m.store.Delete(p.Name)
+		if delErr := m.store.Delete(p.Name); delErr != nil {
+			return fmt.Errorf("%w; additionally failed to rollback process config: %w", svcErr, delErr)
+		}
 		return svcErr
 	}
 

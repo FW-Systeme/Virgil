@@ -53,11 +53,11 @@ func TestRemoveUnitFile(t *testing.T) {
 
 	t.Run("existing file removed", func(t *testing.T) {
 		path := filepath.Join(dir, "exists.service")
-		err := os.WriteFile(path, []byte("content"), 0644)
+		err := os.WriteFile(path, []byte("content"), 0600)
 		require.NoError(t, err)
 
 		err = c.RemoveUnitFile("exists")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		_, err = os.Stat(path)
 		assert.True(t, os.IsNotExist(err))
@@ -367,6 +367,62 @@ ExecStart=/usr/bin/test
 
 	_, err = os.Stat(rotatePath)
 	assert.True(t, os.IsNotExist(err))
+}
+
+func TestReloadAndRestart_Error(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	origSysctl := systemctlCmd
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = dir
+	systemctlCmd = "false" // exits non-zero
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+		systemctlCmd = origSysctl
+	}()
+
+	unitContent := `[Service]
+ExecStart=/usr/bin/test
+`
+	err := os.WriteFile(filepath.Join(dir, "fail-restart.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.SetupLogging(context.Background(), "fail-restart", "/var/log/test.log", "10M", 3)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon-reload failed")
+}
+
+func TestRemoveLogging_ErrorOnRemoveRotate(t *testing.T) {
+	dir := t.TempDir()
+	origUnit := unitPath
+	origRotate := logrotateDir
+	origSysctl := systemctlCmd
+	unitPath = func(name string) string { return filepath.Join(dir, name+".service") }
+	logrotateDir = filepath.Join(dir, "sub")
+	systemctlCmd = "echo"
+	defer func() {
+		unitPath = origUnit
+		logrotateDir = origRotate
+		systemctlCmd = origSysctl
+	}()
+	// Make "sub" a file so os.Remove on sub/vigil-test-app fails with not a directory
+	err := os.WriteFile(logrotateDir, []byte("not-a-dir"), 0600)
+	require.NoError(t, err)
+
+	unitContent := `[Service]
+StandardOutput=append:/var/log/test.log
+ExecStart=/usr/bin/test
+`
+	err = os.WriteFile(filepath.Join(dir, "test-app.service"), []byte(unitContent), 0600)
+	require.NoError(t, err)
+
+	c := &client{}
+	err = c.RemoveLogging(context.Background(), "test-app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "removing logrotate config")
 }
 
 func TestRemoveLogging_Idempotent(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"io"
 )
 
 // NB: Tests that access package-level availablePath/enabledPath vars
@@ -106,7 +107,7 @@ func TestClient_EnableSite_ReplaceExisting(t *testing.T) {
 
 	// Pre-populate both dirs
 	confPath := filepath.Join(availDir, "myapp.conf")
-	err := os.WriteFile(confPath, []byte("old"), 0644)
+	err := os.WriteFile(confPath, []byte("old"), 0600)
 	require.NoError(t, err)
 
 	linkPath := filepath.Join(enabledDir, "myapp.conf")
@@ -150,7 +151,7 @@ func TestClient_EnableSite_SymlinkCreateError(t *testing.T) {
 	}()
 
 	err = c.EnableSite("myapp", 8080, "example.com", "/var/www")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "creating symlink")
 
 	// Verify config file still exists (created before symlink attempt)
@@ -175,7 +176,7 @@ func TestClient_EnableSite_SymlinkRemoveError(t *testing.T) {
 	}()
 
 	err = c.EnableSite("myapp", 8080, "example.com", "/var/www")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "removing existing symlink")
 }
 
@@ -231,7 +232,7 @@ func TestClient_RemoveSiteConfig(t *testing.T) {
 		defer cleanup()
 
 		confPath := filepath.Join(availDir, "myapp.conf")
-		err := os.WriteFile(confPath, []byte("config"), 0644)
+		err := os.WriteFile(confPath, []byte("config"), 0600)
 		require.NoError(t, err)
 
 		err = c.RemoveSiteConfig("myapp")
@@ -246,7 +247,7 @@ func TestClient_RemoveSiteConfig(t *testing.T) {
 		defer cleanup()
 
 		confPath := filepath.Join(availDir, "myapp.conf")
-		err := os.WriteFile(confPath, []byte("config"), 0644)
+		err := os.WriteFile(confPath, []byte("config"), 0600)
 		require.NoError(t, err)
 
 		// Remove write permission — os.Remove fails
@@ -263,7 +264,7 @@ func TestClient_SiteEnabled(t *testing.T) {
 	t.Run("non-existent returns false", func(t *testing.T) {
 		c := &client{}
 		enabled, err := c.SiteEnabled("nonexistent")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.False(t, enabled)
 	})
 
@@ -274,7 +275,7 @@ func TestClient_SiteEnabled(t *testing.T) {
 		// Create a real target so os.Stat follows symlink and succeeds
 		targetDir := t.TempDir()
 		targetPath := filepath.Join(targetDir, "target.conf")
-		err := os.WriteFile(targetPath, []byte("config"), 0644)
+		err := os.WriteFile(targetPath, []byte("config"), 0600)
 		require.NoError(t, err)
 
 		linkPath := filepath.Join(enabledDir, "myapp.conf")
@@ -293,7 +294,7 @@ func TestClient_SiteEnabled(t *testing.T) {
 		// Create target in a dir, then remove search permission
 		targetDir := t.TempDir()
 		targetPath := filepath.Join(targetDir, "target.conf")
-		err := os.WriteFile(targetPath, []byte("x"), 0644)
+		err := os.WriteFile(targetPath, []byte("x"), 0600)
 		require.NoError(t, err)
 
 		// No execute bit = not searchable → os.Stat fails with EACCES
@@ -351,6 +352,48 @@ func TestLogs_NilReceiver(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, r)
 	r.Close()
+}
+
+func TestLogs_CatPath_NonExistentFile(t *testing.T) {
+	t.Parallel()
+	c := &client{}
+	r, err := c.Logs(context.Background(), "nonexistent-test-xyz", 0, false)
+	require.NoError(t, err)
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	assert.Empty(t, data)
+}
+
+func TestLogs_TailPath_NonExistentFile(t *testing.T) {
+	t.Parallel()
+	c := &client{}
+	r, err := c.Logs(context.Background(), "nonexistent-test-xyz", 50, false)
+	require.NoError(t, err)
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	assert.Empty(t, data)
+}
+
+func TestLogs_FollowPath_NonExistentFile(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tail")
+	err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\""), 0755) //nolint:gosec
+	require.NoError(t, err)
+
+	orig := tailCmd
+	tailCmd = script
+	defer func() { tailCmd = orig }()
+
+	c := &client{}
+	r, err := c.Logs(context.Background(), "nonexistent-test-xyz", 10, true)
+	require.NoError(t, err)
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	args := string(data)
+	assert.Contains(t, args, "-n 10")
 }
 
 func TestSetupLogging_CreatesLogrotate(t *testing.T) {

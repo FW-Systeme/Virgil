@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -636,4 +637,101 @@ func TestLogSaveDisable_NoPM(t *testing.T) {
 	cmd.SetArgs([]string{"my-app"})
 	err := cmd.Execute()
 	require.Error(t, err)
+}
+
+func TestLogSaveStatus_NoPM(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cmd := newLogSaveStatusCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"my-app"})
+	err := cmd.Execute()
+	require.Error(t, err)
+}
+
+func TestLogSaveStatus_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cmd := newLogSaveStatusCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"nonexistent"})
+	err := cmd.Execute()
+	require.Error(t, err)
+}
+
+func TestLogs_OutputFlag(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "out.log")
+
+	pm := testPMWithProcesses(map[string]process.Process{
+		"my-app": {Name: "my-app", Type: process.TypeNode},
+	})
+	out, err := executeWithPM(t, pm, []string{"logs", "my-app", "--output", outputPath})
+	require.NoError(t, err)
+	assert.Empty(t, out)
+}
+
+func TestLogSaveEnable_Success(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	pm := testPMWithProcesses(map[string]process.Process{
+		"my-app": {Name: "my-app", Type: process.TypeNode},
+	})
+	out, err := executeWithPM(t, pm, []string{"logsave", "enable", "my-app"})
+	require.NoError(t, err)
+	assert.Contains(t, out, "Enabled log saving")
+}
+
+func TestLogSaveDisable_Success(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	pm := testPMWithProcesses(map[string]process.Process{
+		"my-app": {Name: "my-app", Type: process.TypeNode},
+	})
+	out, err := executeWithPM(t, pm, []string{"logsave", "disable", "my-app"})
+	require.NoError(t, err)
+	assert.Contains(t, out, "Disabled log saving")
+}
+
+func TestLogSaveStatus_Disabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	// Save a disabled log config first
+	ls, err := process.NewLogStore()
+	require.NoError(t, err)
+	err = ls.Save(process.LogConfig{Name: "my-app", Enabled: false, LogPath: "/tmp", MaxSize: "10M", Rotate: 3})
+	require.NoError(t, err)
+
+	cmd := newLogSaveStatusCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"my-app"})
+	err = cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "disabled")
+}
+
+func TestLogSaveStatus_Enabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	ls, err := process.NewLogStore()
+	require.NoError(t, err)
+	err = ls.Save(process.LogConfig{Name: "my-app", Enabled: true, LogPath: "/var/log/vigil/my-app.log", MaxSize: "10M", Rotate: 3})
+	require.NoError(t, err)
+
+	cmd := newLogSaveStatusCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"my-app"})
+	err = cmd.Execute()
+	require.NoError(t, err)
+	output := buf.String()
+	assert.Contains(t, output, "Enabled:   true")
+	assert.Contains(t, output, "Log Path:  /var/log/vigil/my-app.log")
 }
