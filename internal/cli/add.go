@@ -20,9 +20,8 @@ func newAddCmd() *cobra.Command {
 	var envFile string
 	var nginxDomain string
 	var nginxPath string
-	var updateScript string
-	var incomingDir string
-	var keepReleases int
+	var smokeTestScript string
+	var bundledDeps bool
 
 	cmd := &cobra.Command{
 		Use:   "add [name]",
@@ -61,7 +60,7 @@ Examples:
 				return fmt.Errorf("required flag(s) \"port\" not set")
 			}
 
-			return addSingle(cmd, pm, nameArg, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath, port, force, updateScript, incomingDir, keepReleases)
+			return addSingle(cmd, pm, nameArg, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath, port, force, smokeTestScript, bundledDeps)
 		},
 	}
 
@@ -76,29 +75,27 @@ Examples:
 	flags.StringVar(&nginxPath, "nginx-path", "", "Nginx root path (for static apps)")
 	flags.StringVar(&configFile, "config", "", "Path to ecosystem JSON file")
 	flags.BoolVar(&force, "force", false, "Overwrite existing app")
-	flags.StringVar(&updateScript, "update-script", "", "Path to update script for release management")
-	flags.StringVar(&incomingDir, "incoming-dir", "", "Directory for incoming update packages")
-	flags.IntVar(&keepReleases, "keep-releases", 0, "Number of old releases to keep (default 3)")
+	flags.StringVar(&smokeTestScript, "smoke-test-script", "", "Path to smoke test script (activates release management)")
+	flags.BoolVar(&bundledDeps, "bundled-deps", false, "Dependencies are included in the package")
 
 	return cmd
 }
 
-func addSingle(cmd *cobra.Command, pm *process.Manager, name, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath string, port int, force bool, updateScript, incomingDir string, keepReleases int) error {
+func addSingle(cmd *cobra.Command, pm *process.Manager, name, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath string, port int, force bool, smokeTestScript string, bundledDeps bool) error {
 	p := process.Process{
-		Name:         name,
-		Type:         process.Type(appType),
-		Port:         port,
-		Entry:        entry,
-		BuildDir:     buildDir,
-		WorkingDir:   workingDir,
-		EnvFile:      envFile,
-		NginxDomain:  nginxDomain,
-		NginxPath:    nginxPath,
-		CreatedAt:    time.Now(),
-		Enabled:      true,
-		UpdateScript: updateScript,
-		IncomingDir:  incomingDir,
-		KeepReleases: keepReleases,
+		Name:            name,
+		Type:            process.Type(appType),
+		Port:            port,
+		Entry:           entry,
+		BuildDir:        buildDir,
+		WorkingDir:      workingDir,
+		EnvFile:         envFile,
+		NginxDomain:     nginxDomain,
+		NginxPath:       nginxPath,
+		CreatedAt:       time.Now(),
+		Enabled:         true,
+		SmokeTestScript: smokeTestScript,
+		BundledDeps:     bundledDeps,
 	}
 
 	if err := p.Validate(); err != nil {

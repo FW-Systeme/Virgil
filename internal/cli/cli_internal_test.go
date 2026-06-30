@@ -200,7 +200,7 @@ func TestAdd_MissingFlags(t *testing.T) {
 }
 
 func TestAdd_Success(t *testing.T) {
-	out, err := executeWithPM(t, testPM(), []string{"add", "my-app", "--type", "node", "--entry", "./app.js", "--port", "3000"})
+	out, err := executeWithPM(t, testPM(), []string{"add", "my-app", "--type", "node", "--entry", "./app.js", "--port", "3000", "--smoke-test-script", "/smoke.sh"})
 	require.NoError(t, err)
 	assert.Contains(t, out, "Registered")
 }
@@ -353,7 +353,7 @@ func TestContextHelpers(t *testing.T) {
 func TestAdd_WithConfigFile_Single(t *testing.T) {
 	dir := t.TempDir()
 	ecoFile := dir + "/eco.json"
-	err := os.WriteFile(ecoFile, []byte(`{"name":"my-app","type":"node","entry":"./app.js","port":3000}`), 0600)
+	err := os.WriteFile(ecoFile, []byte(`{"name":"my-app","type":"node","entry":"./app.js","port":3000,"smoke_test_script":"/smoke.sh"}`), 0600)
 	require.NoError(t, err)
 	out, err := executeWithPM(t, testPM(), []string{"add", "--config", ecoFile})
 	require.NoError(t, err)
@@ -363,7 +363,7 @@ func TestAdd_WithConfigFile_Single(t *testing.T) {
 func TestAdd_WithConfigFile_Array(t *testing.T) {
 	dir := t.TempDir()
 	ecoFile := dir + "/eco.json"
-	err := os.WriteFile(ecoFile, []byte(`{"apps":[{"name":"a1","type":"node","entry":"e1","port":3000},{"name":"a2","type":"static","build_dir":"bd","port":8080}]}`), 0600)
+	err := os.WriteFile(ecoFile, []byte(`{"apps":[{"name":"a1","type":"node","entry":"e1","port":3000,"smoke_test_script":"/smoke.sh"},{"name":"a2","type":"static","build_dir":"bd","port":8080,"smoke_test_script":"/smoke.sh"}]}`), 0600)
 	require.NoError(t, err)
 	out, err := executeWithPM(t, testPM(), []string{"add", "--config", ecoFile})
 	require.NoError(t, err)
@@ -373,7 +373,7 @@ func TestAdd_WithConfigFile_Array(t *testing.T) {
 func TestAdd_WithConfigFile_NameFilter(t *testing.T) {
 	dir := t.TempDir()
 	ecoFile := dir + "/eco.json"
-	err := os.WriteFile(ecoFile, []byte(`{"apps":[{"name":"app1","type":"node","entry":"e1","port":3000},{"name":"app2","type":"node","entry":"e2","port":3001}]}`), 0600)
+	err := os.WriteFile(ecoFile, []byte(`{"apps":[{"name":"app1","type":"node","entry":"e1","port":3000,"smoke_test_script":"/smoke.sh"},{"name":"app2","type":"node","entry":"e2","port":3001,"smoke_test_script":"/smoke.sh"}]}`), 0600)
 	require.NoError(t, err)
 	out, err := executeWithPM(t, testPM(), []string{"add", "app1", "--config", ecoFile})
 	require.NoError(t, err)
@@ -399,7 +399,7 @@ func TestAdd_WithConfigFile_InvalidJSON(t *testing.T) {
 }
 
 func TestAdd_Static(t *testing.T) {
-	out, err := executeWithPM(t, testPM(), []string{"add", "my-site", "--type", "static", "--build-dir", "./dist", "--port", "8080"})
+	out, err := executeWithPM(t, testPM(), []string{"add", "my-site", "--type", "static", "--build-dir", "./dist", "--port", "8080", "--smoke-test-script", "/smoke.sh"})
 	require.NoError(t, err)
 	assert.Contains(t, out, "Registered")
 }
@@ -407,7 +407,7 @@ func TestAdd_Static(t *testing.T) {
 func TestAdd_WithConfigAndNameArg(t *testing.T) {
 	dir := t.TempDir()
 	ecoFile := dir + "/eco.json"
-	err := os.WriteFile(ecoFile, []byte(`{"apps":[{"name":"app1","type":"node","entry":"e1","port":3000},{"name":"app2","type":"node","entry":"e2","port":3001}]}`), 0600)
+	err := os.WriteFile(ecoFile, []byte(`{"apps":[{"name":"app1","type":"node","entry":"e1","port":3000,"smoke_test_script":"/smoke.sh"},{"name":"app2","type":"node","entry":"e2","port":3001,"smoke_test_script":"/smoke.sh"}]}`), 0600)
 	require.NoError(t, err)
 	out, err := executeWithPM(t, testPM(), []string{"add", "app1", "--config", ecoFile})
 	require.NoError(t, err)
@@ -430,13 +430,13 @@ func TestRestart_MissingName(t *testing.T) {
 }
 
 func TestAdd_WithFlagsOnly(t *testing.T) {
-	out, err := executeWithPM(t, testPM(), []string{"add", "my-api", "--type", "node", "--port", "3000", "--entry", "app.js"})
+	out, err := executeWithPM(t, testPM(), []string{"add", "my-api", "--type", "node", "--port", "3000", "--entry", "app.js", "--smoke-test-script", "/smoke.sh"})
 	require.NoError(t, err)
 	assert.Contains(t, out, "Registered")
 }
 
 func TestAdd_StaticWithEntry(t *testing.T) {
-	out, err := executeWithPM(t, testPM(), []string{"add", "my-site", "--type", "static", "--build-dir", "./dist", "--port", "8080", "--entry", "ignored.js"})
+	out, err := executeWithPM(t, testPM(), []string{"add", "my-site", "--type", "static", "--build-dir", "./dist", "--port", "8080", "--entry", "ignored.js", "--smoke-test-script", "/smoke.sh"})
 	require.NoError(t, err)
 	assert.Contains(t, out, "Registered")
 }
@@ -502,18 +502,18 @@ func TestCommandFlags(t *testing.T) {
 
 func TestAdd_DuplicateWithoutForce(t *testing.T) {
 	pm := testPMWithProcesses(map[string]process.Process{
-		"my-app": {Name: "my-app", Type: process.TypeNode},
+		"my-app": {Name: "my-app", Type: process.TypeNode, SmokeTestScript: "/smoke.sh"},
 	})
-	out, err := executeWithPM(t, pm, []string{"add", "my-app", "--type", "node", "--entry", "./app.js", "--port", "3000"})
+	out, err := executeWithPM(t, pm, []string{"add", "my-app", "--type", "node", "--entry", "./app.js", "--port", "3000", "--smoke-test-script", "/smoke.sh"})
 	require.Error(t, err)
 	assert.Contains(t, out, "already exists")
 }
 
 func TestAdd_DuplicateWithForce(t *testing.T) {
 	pm := testPMWithProcesses(map[string]process.Process{
-		"my-app": {Name: "my-app", Type: process.TypeNode},
+		"my-app": {Name: "my-app", Type: process.TypeNode, SmokeTestScript: "/smoke.sh"},
 	})
-	out, err := executeWithPM(t, pm, []string{"add", "my-app", "--type", "static", "--build-dir", "./dist", "--port", "8080", "--force"})
+	out, err := executeWithPM(t, pm, []string{"add", "my-app", "--type", "static", "--build-dir", "./dist", "--port", "8080", "--force", "--smoke-test-script", "/smoke.sh"})
 	require.NoError(t, err)
 	assert.Contains(t, out, "Registered")
 }
@@ -521,11 +521,11 @@ func TestAdd_DuplicateWithForce(t *testing.T) {
 func TestAdd_WithConfigFile_Duplicate(t *testing.T) {
 	dir := t.TempDir()
 	ecoFile := dir + "/eco.json"
-	err := os.WriteFile(ecoFile, []byte(`{"name":"my-app","type":"node","entry":"./app.js","port":3000}`), 0600)
+	err := os.WriteFile(ecoFile, []byte(`{"name":"my-app","type":"node","entry":"./app.js","port":3000,"smoke_test_script":"/smoke.sh"}`), 0600)
 	require.NoError(t, err)
 
 	pm := testPMWithProcesses(map[string]process.Process{
-		"my-app": {Name: "my-app", Type: process.TypeNode},
+		"my-app": {Name: "my-app", Type: process.TypeNode, SmokeTestScript: "/smoke.sh"},
 	})
 	out, err := executeWithPM(t, pm, []string{"add", "--config", ecoFile})
 	require.Error(t, err)
@@ -535,7 +535,7 @@ func TestAdd_WithConfigFile_Duplicate(t *testing.T) {
 func TestAdd_WithConfigFile_Force(t *testing.T) {
 	dir := t.TempDir()
 	ecoFile := dir + "/eco.json"
-	err := os.WriteFile(ecoFile, []byte(`{"name":"my-app","type":"static","build_dir":"./dist","port":8080}`), 0600)
+	err := os.WriteFile(ecoFile, []byte(`{"name":"my-app","type":"static","build_dir":"./dist","port":8080,"smoke_test_script":"/smoke.sh"}`), 0600)
 	require.NoError(t, err)
 
 	pm := testPMWithProcesses(map[string]process.Process{

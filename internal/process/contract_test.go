@@ -10,13 +10,18 @@ import (
 )
 
 func TestValidate_ValidNode(t *testing.T) {
-	p := Process{Name: "my-app", Type: TypeNode, Port: 3000, Entry: "./app.js"}
+	p := Process{Name: "my-app", Type: TypeNode, Port: 3000, Entry: "./app.js", SmokeTestScript: "/smoke.sh"}
 	assert.NoError(t, p.Validate())
 }
 
 func TestValidate_ValidStatic(t *testing.T) {
-	p := Process{Name: "my-site", Type: TypeStatic, Port: 8080, BuildDir: "./dist"}
+	p := Process{Name: "my-site", Type: TypeStatic, Port: 8080, BuildDir: "./dist", SmokeTestScript: "/smoke.sh"}
 	assert.NoError(t, p.Validate())
+}
+
+func TestValidate_MissingSmokeTest(t *testing.T) {
+	p := Process{Name: "app", Type: TypeNode, Port: 3000, Entry: "app.js"}
+	assert.ErrorContains(t, p.Validate(), "smoke_test_script")
 }
 
 func TestValidate_MissingName(t *testing.T) {

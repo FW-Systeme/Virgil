@@ -338,7 +338,7 @@ func unitContent(p Process) []byte {
 	workingDir := p.WorkingDir
 	entry := p.Entry
 
-	if p.UpdateScript != "" {
+	if p.SmokeTestScript != "" {
 		workingDir = filepath.Join(p.WorkingDir, "current")
 		if p.EnvFile != "" {
 			p.EnvFile = filepath.Join(p.WorkingDir, "shared", ".env")

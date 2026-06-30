@@ -151,7 +151,7 @@ func TestManager_AddProcess_Node_Success(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, sd, ng)
 
-	p := Process{Name: "test-app", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app"}
+	p := Process{Name: "test-app", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.NoError(t, err)
 	assert.True(t, sd.createCalled, "CreateUnitFile should be called")
@@ -165,7 +165,7 @@ func TestManager_AddProcess_Static_Success(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, sd, ng)
 
-	p := Process{Name: "test-site", Type: TypeStatic, Port: 8080, BuildDir: "./dist", NginxDomain: "example.com", NginxPath: "/var/www"}
+	p := Process{Name: "test-site", Type: TypeStatic, Port: 8080, BuildDir: "./dist", NginxDomain: "example.com", NginxPath: "/var/www", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.NoError(t, err)
 	assert.True(t, ng.enableCalled, "EnableSite should be called")
@@ -177,7 +177,7 @@ func TestManager_AddProcess_Duplicate_NoForce(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{"existing": {Name: "existing"}}}
 	m := New(store, sd, ng)
 
-	p := Process{Name: "existing", Type: TypeNode, Port: 3000, Entry: "app.js"}
+	p := Process{Name: "existing", Type: TypeNode, Port: 3000, Entry: "app.js", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
@@ -189,7 +189,7 @@ func TestManager_AddProcess_Duplicate_Force(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{"existing": {Name: "existing"}}}
 	m := New(store, sd, ng)
 
-	p := Process{Name: "existing", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app"}
+	p := Process{Name: "existing", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, true)
 	require.NoError(t, err)
 }
@@ -210,7 +210,7 @@ func TestManager_AddProcess_NilSystemd(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, nil, ng)
 
-	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js"}
+	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "systemd client not available")
@@ -221,7 +221,7 @@ func TestManager_AddProcess_NilNginx(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, sd, nil)
 
-	p := Process{Name: "test", Type: TypeStatic, Port: 8080, BuildDir: "./dist"}
+	p := Process{Name: "test", Type: TypeStatic, Port: 8080, BuildDir: "./dist", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nginx client not available")
@@ -404,8 +404,8 @@ func TestUnitContent_WithEnvFile(t *testing.T) {
 	assert.Contains(t, content, "EnvironmentFile=/app/.env")
 }
 
-func TestUnitContent_WithUpdateScript(t *testing.T) {
-	p := Process{Name: "my-app", Type: TypeNode, WorkingDir: "/opt/app", Entry: "server.js", EnvFile: "/opt/app/.env", UpdateScript: "/opt/app/update.sh"}
+func TestUnitContent_WithSmokeTestScript(t *testing.T) {
+	p := Process{Name: "my-app", Type: TypeNode, WorkingDir: "/opt/app", Entry: "server.js", EnvFile: "/opt/app/.env", SmokeTestScript: "/opt/app/smoke.sh"}
 	content := string(unitContent(p))
 	assert.Contains(t, content, "WorkingDirectory=/opt/app/current")
 	assert.Contains(t, content, "ExecStart=/usr/bin/node server.js")
@@ -475,7 +475,7 @@ func TestManager_Status_StaticNilNginx(t *testing.T) {
 func TestManager_AddProcess_StoreSaveError(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{}, err: fmt.Errorf("save failed")}
 	m := New(store, &mockSystemd{}, &mockNginx{})
-	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js"}
+	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 }
@@ -484,7 +484,7 @@ func TestManager_AddProcess_SystemdCreateError(t *testing.T) {
 	sd := &mockSystemd{err: fmt.Errorf("create failed")}
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, sd, &mockNginx{})
-	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app"}
+	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 }
@@ -577,7 +577,7 @@ func TestManager_AddProcess_NodeNilWorkingDir(t *testing.T) {
 	sd := &mockSystemd{}
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, sd, &mockNginx{})
-	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js"}
+	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.NoError(t, err)
 	assert.True(t, sd.createCalled)
@@ -683,7 +683,7 @@ func TestManager_AddProcess_SystemdCreateErrorWithNilNginx(t *testing.T) {
 	sd := &mockSystemd{err: fmt.Errorf("create failed")}
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, sd, nil)
-	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app"}
+	p := Process{Name: "test", Type: TypeNode, Port: 3000, Entry: "app.js", WorkingDir: "/app", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 }
@@ -692,7 +692,7 @@ func TestManager_AddProcess_NginxEnableError(t *testing.T) {
 	ng := &mockNginx{err: fmt.Errorf("enable failed")}
 	store := &mockStore{processes: map[string]Process{}}
 	m := New(store, nil, ng)
-	p := Process{Name: "test", Type: TypeStatic, Port: 8080, BuildDir: "./dist"}
+	p := Process{Name: "test", Type: TypeStatic, Port: 8080, BuildDir: "./dist", SmokeTestScript: "/smoke.sh"}
 	err := m.AddProcess(context.Background(), p, false)
 	require.Error(t, err)
 }

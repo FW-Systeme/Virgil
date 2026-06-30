@@ -1,10 +1,13 @@
 package update
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,20 +32,13 @@ func (s *service) Update(ctx context.Context, name string, version string) error
 		return fmt.Errorf("loading process: %w", err)
 	}
 
-	if p.UpdateScript == "" {
-		return ErrNotScript
-	}
-
 	workingDir := p.WorkingDir
 	if workingDir == "" {
 		return fmt.Errorf("working_dir not set")
 	}
 
 	releasesDir := filepath.Join(workingDir, "releases")
-	incomingDir := p.IncomingDir
-	if incomingDir == "" {
-		incomingDir = filepath.Join(workingDir, "incoming")
-	}
+	incomingDir := filepath.Join(workingDir, "incoming")
 	sharedDir := filepath.Join(workingDir, "shared")
 	currentSymlink := filepath.Join(workingDir, "current")
 
@@ -78,28 +74,22 @@ func (s *service) Update(ctx context.Context, name string, version string) error
 		return fmt.Errorf("creating release dir: %w", err)
 	}
 
-	script := p.UpdateScript
+	if err := extractTarGz(pkgPath, releaseDir); err != nil {
+		os.RemoveAll(releaseDir)
+		return err
+	}
 
-	cleanup := func() { os.RemoveAll(releaseDir) }
+	if !p.BundledDeps {
+		if err := installDeps(releaseDir); err != nil {
+			os.RemoveAll(releaseDir)
+			return err
+		}
+	}
 
-	if err := runScript(script, "extract", pkgPath, releaseDir); err != nil {
-		cleanup()
-		return err
-	}
-	if err := runScript(script, "deps", releaseDir); err != nil {
-		cleanup()
-		return err
-	}
-	if err := runScript(script, "migrate", releaseDir, sharedDir); err != nil {
-		cleanup()
-		return err
-	}
 	if err := linkShared(sharedDir, releaseDir); err != nil {
-		cleanup()
+		os.RemoveAll(releaseDir)
 		return fmt.Errorf("linking shared: %w", err)
 	}
-
-	runScript(script, "health-check", releaseDir)
 
 	oldTarget := ""
 	if current, err := os.Readlink(currentSymlink); err == nil {
@@ -107,28 +97,24 @@ func (s *service) Update(ctx context.Context, name string, version string) error
 	}
 
 	if err := switchSymlink(currentSymlink, releaseDir); err != nil {
-		cleanup()
+		os.RemoveAll(releaseDir)
 		return fmt.Errorf("switching symlink: %w", err)
 	}
 
 	if err := s.restart(ctx, name); err != nil {
 		rollbackSymlink(currentSymlink, oldTarget)
 		s.restart(ctx, name)
-		cleanup()
+		os.RemoveAll(releaseDir)
 		return fmt.Errorf("restart after update: %w", err)
 	}
 
-	if err := runScript(script, "health-check", releaseDir); err != nil {
+	if err := runScript(p.SmokeTestScript, releaseDir); err != nil {
 		rollbackSymlink(currentSymlink, oldTarget)
 		s.restart(ctx, name)
 		return ErrRolledBack
 	}
 
-	keep := p.KeepReleases
-	if keep <= 0 {
-		keep = 3
-	}
-	if err := cleanupReleases(releasesDir, version, keep); err != nil {
+	if err := cleanupReleases(releasesDir, version, 3); err != nil {
 		return fmt.Errorf("cleaning up releases: %w", err)
 	}
 
@@ -190,13 +176,74 @@ func verifyIntegrity(pkgPath string) error {
 	return nil
 }
 
-func runScript(script string, subcommand string, args ...string) error {
-	cmdArgs := append([]string{subcommand}, args...)
-	cmd := exec.Command(script, cmdArgs...)
+func extractTarGz(src, dest string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("opening package: %w", err)
+	}
+	defer f.Close()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("reading gzip: %w", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("reading tar: %w", err)
+		}
+
+		target := filepath.Join(dest, header.Name)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)+string(os.PathSeparator)) {
+			continue
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			of, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(of, tr); err != nil {
+				of.Close()
+				return err
+			}
+			of.Close()
+		}
+	}
+	return nil
+}
+
+func installDeps(releaseDir string) error {
+	cmd := exec.Command("npm", "ci", "--production", "--ignore-scripts")
+	cmd.Dir = releaseDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w: %s %s: %v", ErrScriptFailed, script, strings.Join(cmdArgs, " "), err)
+		return fmt.Errorf("%w: npm ci: %v", ErrDepsFailed, err)
+	}
+	return nil
+}
+
+func runScript(script string, releaseDir string) error {
+	cmd := exec.Command(script, releaseDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrSmokeTest, script, err)
 	}
 	return nil
 }
