@@ -24,6 +24,7 @@ type Process struct {
 	WorkingDir      string    `json:"working_dir,omitempty"`
 	NginxDomain     string    `json:"nginx_domain,omitempty"`
 	NginxPath       string    `json:"nginx_path,omitempty"`
+	NginxConfig     string    `json:"nginx_config,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	Enabled         bool      `json:"enabled"`
 	SmokeTestScript string    `json:"smoke_test_script,omitempty"`

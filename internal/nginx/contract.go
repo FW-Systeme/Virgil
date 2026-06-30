@@ -8,6 +8,10 @@ import (
 // Client defines the interface for nginx site management and log access.
 type Client interface {
 	EnableSite(name string, port int, domain, root string) error
+	// EnableSiteFromFile copies a custom nginx config file to sites-available/
+	// and creates the sites-enabled symlink. The configPath must be an absolute path
+	// to a valid nginx config file.
+	EnableSiteFromFile(name string, configPath string) error
 	DisableSite(name string) error
 	RemoveSiteConfig(name string) error
 	SiteEnabled(name string) (bool, error)

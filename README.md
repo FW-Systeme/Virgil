@@ -89,9 +89,8 @@ Registriert eine neue App.
 | `--nginx-path` | `string` | nein | nginx `root`-Pfad |
 | `--config` | `string` | nein | Pfad zur ecosystem.json |
 | `--force` | `bool` | nein | Überschreibt existierende App |
-| `--update-script` | `string` | nein | Pfad zum Update-Skript (aktiviert Release-Management) |
-| `--incoming-dir` | `string` | nein | Verzeichnis für hochgeladene Update-Pakete (Default: `<working-dir>/incoming`) |
-| `--keep-releases` | `int` | nein | Anzahl der zu behaltenden Releases (Default: 3) |
+| `--smoke-test-script` | `string` | **ja** | Pfad zum Smoke-Test-Skript (aktiviert Release-Management) |
+| `--bundled-deps` | `bool` | nein | Abhängigkeiten sind im Paket enthalten (default: `false`, dann `npm ci --production`) |
 
 \* `--type` und `--port` sind nur Pflicht, wenn ohne `--config` gearbeitet wird.
 
@@ -116,12 +115,10 @@ vigil add my-api --config ecosystem.json
 # Vorhandene App überschreiben
 vigil add my-api --type node --entry app.js --port 3000 --force
 
-# Mit Update-Skript (aktiviert Release-Management)
+# Mit Smoke-Test-Skript (aktiviert Release-Management)
 vigil add my-api --type node --entry server.js --port 3000 \
   --working-dir /opt/myapp \
-  --update-script /opt/myapp/update.sh \
-  --incoming-dir /opt/myapp/incoming \
-  --keep-releases 5
+  --smoke-test-script /opt/myapp/smoke.sh
 ```
 
 ---
@@ -195,7 +192,7 @@ vigil restart my-api
 
 ### `vigil update <name>`
 
-Führt ein Release-Update für eine App mit konfiguriertem `--update-script` durch.
+Führt ein Release-Update für eine App mit konfiguriertem `--smoke-test-script` durch.
 
 ```bash
 # Update auf bestimmte Version
@@ -203,9 +200,6 @@ vigil update my-api --version v1.2.0
 
 # Version automatisch aus incoming/ ermitteln
 vigil update my-api
-
-# keep-releases temporär überschreiben
-vigil update my-api --version v1.2.0 --keep-releases 5
 ```
 
 **Flags:**
@@ -213,7 +207,6 @@ vigil update my-api --version v1.2.0 --keep-releases 5
 | Flag | Typ | Beschreibung |
 |------|-----|-------------|
 | `--version` | `string` | Zielversion (z.B. `v1.2.0`). Wird leer gelassen, scannt Vigil `incoming/` nach `.tar.gz`-Dateien |
-| `--keep-releases` | `int` | Überschreibt `keep_releases` aus der Config (Default aus Config oder 3) |
 
 **Ablauf:**
 
@@ -222,17 +215,15 @@ vigil update my-api --version v1.2.0 --keep-releases 5
  2. Dirs         ← releases/, shared/, incoming/ anlegen
  3. Version      ← aus --version oder Auto-Detekt in incoming/
  4. Integrität   ← SHA256-Prüfung (falls .sha256-Datei vorhanden)
- 5. Extract      → ./update.sh extract <package> <release-dir>
- 6. Deps         → ./update.sh deps <release-dir>
- 7. Migrate      → ./update.sh migrate <release-dir> <shared-dir>
- 8. Shared-Links ← Symlinks aus shared/ in release-Dir
- 9. Pre-Check    → ./update.sh health-check <release-dir> (optional)
-10. Symlink      ← current → releases/<version> (atomar)
-11. Restart      ← systemd restart / nginx reload
-12. Health-Check → ./update.sh health-check <release-dir>
-13. Rollback?    ← Bei Fehler: Symlink zurück, Restart, Abbruch
-14. Cleanup      ← Alte Releases löschen (keep_releases)
-15. Unlock       ← .vigil.lock entfernen
+ 5. Extract      ← Archiv via tar entpacken (von Virgil selbst, kein App-Skript)
+ 6. Deps         ← npm ci --production (falls nicht --bundled-deps)
+ 7. Shared-Links ← Symlinks aus shared/ in release-Dir
+ 8. Symlink      ← current → releases/<version> (atomar)
+ 9. Restart      ← systemd restart / nginx reload
+10. Smoke-Test   → ./smoke.sh <release-dir>
+11. Rollback?    ← Bei Fehler: Symlink zurück, Restart, Abbruch
+12. Cleanup      ← Alte Releases löschen (keep=3, fix)
+13. Unlock       ← .vigil.lock entfernen
 ```
 
 ---
@@ -258,9 +249,8 @@ vigil init --output mein-projekt.json
   "working_dir": "",
   "nginx_domain": "",
   "nginx_path": "",
-  "update_script": "",
-  "incoming_dir": "",
-  "keep_releases": 3,
+  "smoke_test_script": "",
+  "bundled_deps": false,
   "created_at": "2025-01-01T00:00:00Z",
   "enabled": true
 }
@@ -345,9 +335,8 @@ Die `ecosystem.json` erlaubt es, mehrere Apps auf einmal zu registrieren. Das Fo
 | `working_dir` | `string` | nein | Arbeitsverzeichnis der App |
 | `nginx_domain` | `string` | nein | nginx `server_name` |
 | `nginx_path` | `string` | nein | nginx `root`-Pfad |
-| `update_script` | `string` | nein | Pfad zum Update-Skript (aktiviert Release-Management) |
-| `incoming_dir` | `string` | nein | Verzeichnis für hochgeladene Update-Pakete (Default: `<working_dir>/incoming`) |
-| `keep_releases` | `int` | nein | Anzahl zu behaltender alter Releases (Default: 3) |
+| `smoke_test_script` | `string` | ja, wenn Release-Management | Pfad zum Smoke-Test-Skript |
+| `bundled_deps` | `bool` | nein | Abhängigkeiten im Paket enthalten (default: `false`, dann `npm ci --production`) |
 | `enabled` | `bool` | nein | Ob die App aktiv ist (default: `false`) |
 
 ### Nutzung
@@ -432,7 +421,7 @@ Ein Symlink `/etc/nginx/sites-enabled/<name>.conf` → `sites-available/<name>.c
 
 ## Update-Prozess (Release-Management)
 
-Apps mit konfiguriertem `--update-script` nutzen das integrierte Release-Management von Vigil.
+Apps mit konfiguriertem `--smoke-test-script` nutzen das integrierte Release-Management von Vigil.
 
 ### Verzeichnisstruktur
 
@@ -453,7 +442,7 @@ Apps mit konfiguriertem `--update-script` nutzen das integrierte Release-Managem
 - **`incoming/`** — Zielort für übertragene `.tar.gz`-Pakete
 
 Die systemd-Unit zeigt auf `<working-dir>/current`, nie auf eine konkrete Version.
-Beim Add mit `--update-script` passt Vigil die Unit automatisch an:
+Beim Add mit `--smoke-test-script` passt Vigil die Unit automatisch an:
 
 ```ini
 [Service]
@@ -462,18 +451,19 @@ ExecStart=/usr/bin/node server.js          # Entry relativ zu current/
 EnvironmentFile=/opt/myapp/shared/.env     # Env aus shared/
 ```
 
-### Update-Skript-Schnittstelle
+### Smoke-Test-Skript-Schnittstelle
 
-Das Skript erhält Subcommands mit Argumenten. Der Exit-Code bestimmt den Erfolg:
+Das Skript ist ein einzelnes ausführbares Skript, das als einziges Argument das Release-Verzeichnis erhält:
 
-| Subcommand | Argumente | Beschreibung |
-|------------|-----------|-------------|
-| `extract` | `<package-path> <release-dir>` | `.tar.gz` entpacken |
-| `deps` | `<release-dir>` | Abhängigkeiten installieren (npm ci o.ä.) |
-| `migrate` | `<release-dir> <shared-dir>` | Datenbank-Migrationen |
-| `health-check` | `<release-dir>` | Smoke-Test der neuen Version |
+```bash
+./smoke.sh <release-dir>
+```
 
-**Exit-Codes:** `0` = Erfolg, `≠0` = Abbruch. Bei `health-check` nach dem Restart löst ein Fehler automatisch **Rollback** aus.
+**Exit-Codes:** `0` = Erfolg, `≠0` = Fehler → Rollback.
+
+- Entpacken und Abhängigkeiten (`npm ci --production`) übernimmt Vigil selbst.
+- Der Smoke-Test läuft **nach** dem Symlink-Switch und dem Restart.
+- Ein Fehler löst automatisch Rollback auf die vorherige Version aus.
 
 **Beispiel-Skript:**
 
@@ -481,24 +471,11 @@ Das Skript erhält Subcommands mit Argumenten. Der Exit-Code bestimmt den Erfolg
 #!/bin/bash
 set -euo pipefail
 
-ACTION="$1"
-RELEASE_DIR="${3:-$2}"
+RELEASE_DIR="$1"
+cd "$RELEASE_DIR"
 
-case "$ACTION" in
-  extract)
-    tar -xzf "$2" -C "$3"
-    ;;
-  deps)
-    cd "$2" && npm ci --production
-    ;;
-  migrate)
-    cd "$2" && node migrate.js
-    ;;
-  health-check)
-    # Smoke-Test: prüfe Health-Endpunkt
-    curl -sf http://localhost:3000/health > /dev/null
-    ;;
-esac
+# Prüfe Health-Endpunkt der neuen Version
+curl -sf http://localhost:3000/health > /dev/null
 ```
 
 ### Update-Paket-Format
@@ -551,9 +528,8 @@ Jede App wird als einzelne JSON-Datei gespeichert. Schreibvorgänge sind atomar 
   "nginx_path": "",
   "created_at": "2025-01-15T10:30:00Z",
   "enabled": true,
-  "update_script": "/opt/myapp/update.sh",
-  "incoming_dir": "/opt/myapp/incoming",
-  "keep_releases": 3
+  "smoke_test_script": "/opt/myapp/smoke.sh",
+  "bundled_deps": false
 }
 ```
 
