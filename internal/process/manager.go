@@ -66,7 +66,7 @@ func (m *Manager) AddProcess(ctx context.Context, p Process, force bool) error {
 			svcErr = fmt.Errorf("nginx client not available")
 			break
 		}
-		if err := m.nginx.EnableSite(p.Name, p.Port, p.NginxDomain, p.NginxPath); err != nil {
+		if err := m.enableSite(p); err != nil {
 			svcErr = fmt.Errorf("enabling nginx site: %w", err)
 			break
 		}
@@ -157,7 +157,7 @@ func (m *Manager) StartProcess(ctx context.Context, name string) error {
 		if m.nginx == nil {
 			return fmt.Errorf("nginx client not available")
 		}
-		if err := m.nginx.EnableSite(p.Name, p.Port, p.NginxDomain, p.NginxPath); err != nil {
+		if err := m.enableSite(p); err != nil {
 			return fmt.Errorf("enabling nginx site: %w", err)
 		}
 		if err := m.nginx.Reload(ctx); err != nil {
@@ -222,7 +222,7 @@ func (m *Manager) RestartProcess(ctx context.Context, name string) error {
 		if err := m.nginx.DisableSite(name); err != nil {
 			return fmt.Errorf("disabling nginx site: %w", err)
 		}
-		if err := m.nginx.EnableSite(p.Name, p.Port, p.NginxDomain, p.NginxPath); err != nil {
+		if err := m.enableSite(p); err != nil {
 			return fmt.Errorf("enabling nginx site: %w", err)
 		}
 		if err := m.nginx.Reload(ctx); err != nil {
@@ -232,6 +232,13 @@ func (m *Manager) RestartProcess(ctx context.Context, name string) error {
 	default:
 		return fmt.Errorf("unknown process type: %s", p.Type)
 	}
+}
+
+func (m *Manager) enableSite(p Process) error {
+	if p.NginxConfig != "" {
+		return m.nginx.EnableSiteFromFile(p.Name, p.NginxConfig)
+	}
+	return m.nginx.EnableSite(p.Name, p.Port, p.NginxDomain, p.NginxPath)
 }
 
 func (m *Manager) Status(ctx context.Context, name string) (activeState, subState string, err error) {

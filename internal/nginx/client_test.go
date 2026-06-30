@@ -180,6 +180,38 @@ func TestClient_EnableSite_SymlinkRemoveError(t *testing.T) {
 	assert.Contains(t, err.Error(), "removing existing symlink")
 }
 
+func TestClient_EnableSiteFromFile(t *testing.T) {
+	c, availDir, enabledDir, cleanup := setupTempDirs(t)
+	defer cleanup()
+
+	// Create a custom config file
+	configPath := filepath.Join(t.TempDir(), "my-custom.conf")
+	err := os.WriteFile(configPath, []byte("custom nginx config"), 0644)
+	require.NoError(t, err)
+
+	err = c.EnableSiteFromFile("myapp", configPath)
+	require.NoError(t, err)
+
+	// Verify config was copied to sites-available
+	confPath := filepath.Join(availDir, "myapp.conf")
+	data, err := os.ReadFile(confPath)
+	require.NoError(t, err)
+	assert.Equal(t, "custom nginx config", string(data))
+
+	// Verify symlink in sites-enabled
+	linkPath := filepath.Join(enabledDir, "myapp.conf")
+	linkTarget, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, confPath, linkTarget)
+}
+
+func TestClient_EnableSiteFromFile_NonExistentSource(t *testing.T) {
+	c := &client{}
+	err := c.EnableSiteFromFile("myapp", "/nonexistent/path.conf")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading config")
+}
+
 func TestClient_DisableSite(t *testing.T) {
 	t.Run("non-existent returns nil", func(t *testing.T) {
 		c := &client{}

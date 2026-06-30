@@ -39,6 +39,28 @@ type configData struct {
 	Name   string
 }
 
+func (c *client) EnableSiteFromFile(name string, configPath string) error {
+	confPath := availablePath(name)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("enabling nginx site from file: reading config: %w", err)
+	}
+	if err := os.WriteFile(confPath, data, 0644); err != nil {
+		return fmt.Errorf("enabling nginx site from file: writing config: %w", err)
+	}
+
+	linkPath := enabledPath(name)
+	if _, err := os.Lstat(linkPath); err == nil {
+		if err := os.Remove(linkPath); err != nil {
+			return fmt.Errorf("enabling nginx site from file: removing existing symlink: %w", err)
+		}
+	}
+	if err := os.Symlink(confPath, linkPath); err != nil {
+		return fmt.Errorf("enabling nginx site from file: creating symlink: %w", err)
+	}
+	return nil
+}
+
 func (c *client) EnableSite(name string, port int, domain, root string) error {
 	tmpl, err := template.New("site").Parse(configTemplate)
 	if err != nil {

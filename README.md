@@ -87,6 +87,7 @@ Registriert eine neue App.
 | `--env-file` | `string` | nein | Pfad zur Environment-Datei |
 | `--nginx-domain` | `string` | nein | nginx `server_name` |
 | `--nginx-path` | `string` | nein | nginx `root`-Pfad |
+| `--nginx-config` | `string` | nein | Pfad zu benutzerdefinierter nginx-Config (überschreibt Auto-Generierung) |
 | `--config` | `string` | nein | Pfad zur ecosystem.json |
 | `--force` | `bool` | nein | Überschreibt existierende App |
 | `--smoke-test-script` | `string` | **ja** | Pfad zum Smoke-Test-Skript (aktiviert Release-Management) |
@@ -335,6 +336,7 @@ Die `ecosystem.json` erlaubt es, mehrere Apps auf einmal zu registrieren. Das Fo
 | `working_dir` | `string` | nein | Arbeitsverzeichnis der App |
 | `nginx_domain` | `string` | nein | nginx `server_name` |
 | `nginx_path` | `string` | nein | nginx `root`-Pfad |
+| `nginx_config` | `string` | nein | Pfad zu benutzerdefinierter nginx-Config (überschreibt Auto-Generierung) |
 | `smoke_test_script` | `string` | ja, wenn Release-Management | Pfad zum Smoke-Test-Skript |
 | `bundled_deps` | `bool` | nein | Abhängigkeiten im Paket enthalten (default: `false`, dann `npm ci --production`) |
 | `enabled` | `bool` | nein | Ob die App aktiv ist (default: `false`) |

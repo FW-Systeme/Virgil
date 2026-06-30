@@ -90,6 +90,10 @@ func (m *mockNginx) EnableSite(name string, port int, domain, root string) error
 	m.enableCalled = true
 	return m.err
 }
+func (m *mockNginx) EnableSiteFromFile(name string, configPath string) error {
+	m.enableCalled = true
+	return m.err
+}
 func (m *mockNginx) DisableSite(name string) error {
 	m.disableCalled = true
 	return m.err
@@ -157,6 +161,17 @@ func TestManager_AddProcess_Node_Success(t *testing.T) {
 	assert.True(t, sd.createCalled, "CreateUnitFile should be called")
 	assert.True(t, sd.enableCalled, "EnableUnit should be called")
 	assert.True(t, sd.reloadCalled, "Reload should be called")
+}
+
+func TestManager_AddProcess_Static_WithNginxConfig(t *testing.T) {
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{}}
+	m := New(store, nil, ng)
+
+	p := Process{Name: "test-site", Type: TypeStatic, Port: 8080, BuildDir: "./dist", NginxConfig: "/etc/nginx/custom.conf", SmokeTestScript: "/smoke.sh"}
+	err := m.AddProcess(context.Background(), p, false)
+	require.NoError(t, err)
+	assert.True(t, ng.enableCalled, "enableSite should be called")
 }
 
 func TestManager_AddProcess_Static_Success(t *testing.T) {
