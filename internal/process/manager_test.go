@@ -404,6 +404,14 @@ func TestUnitContent_WithEnvFile(t *testing.T) {
 	assert.Contains(t, content, "EnvironmentFile=/app/.env")
 }
 
+func TestUnitContent_WithUpdateScript(t *testing.T) {
+	p := Process{Name: "my-app", Type: TypeNode, WorkingDir: "/opt/app", Entry: "server.js", EnvFile: "/opt/app/.env", UpdateScript: "/opt/app/update.sh"}
+	content := string(unitContent(p))
+	assert.Contains(t, content, "WorkingDirectory=/opt/app/current")
+	assert.Contains(t, content, "ExecStart=/usr/bin/node server.js")
+	assert.Contains(t, content, "EnvironmentFile=/opt/app/shared/.env")
+}
+
 func TestManager_StartProcess_UnknownType(t *testing.T) {
 	store := &mockStore{processes: map[string]Process{"x": {Name: "x", Type: "unknown"}}}
 	m := New(store, nil, nil)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/chris576/vigil/internal/nginx"
 	"github.com/chris576/vigil/internal/systemd"
@@ -22,6 +23,8 @@ func New(store Store, systemdClient systemd.Client, nginxClient nginx.Client) *M
 		nginx:   nginxClient,
 	}
 }
+
+func (m *Manager) Store() Store { return m.store }
 
 func (m *Manager) AddProcess(ctx context.Context, p Process, force bool) error {
 	if err := p.Validate(); err != nil {
@@ -332,6 +335,16 @@ func (m *Manager) RemoveLogging(ctx context.Context, name string) error {
 }
 
 func unitContent(p Process) []byte {
+	workingDir := p.WorkingDir
+	entry := p.Entry
+
+	if p.UpdateScript != "" {
+		workingDir = filepath.Join(p.WorkingDir, "current")
+		if p.EnvFile != "" {
+			p.EnvFile = filepath.Join(p.WorkingDir, "shared", ".env")
+		}
+	}
+
 	content := fmt.Sprintf(`[Unit]
 Description=Vigil: %s
 After=network.target
@@ -342,7 +355,7 @@ WorkingDirectory=%s
 ExecStart=/usr/bin/node %s
 Restart=on-failure
 RestartSec=5
-`, p.Name, p.WorkingDir, p.Entry)
+`, p.Name, workingDir, entry)
 
 	if p.EnvFile != "" {
 		content += fmt.Sprintf("EnvironmentFile=%s\n", p.EnvFile)
