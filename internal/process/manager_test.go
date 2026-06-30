@@ -149,6 +149,44 @@ func (m *mockStore) List() ([]Process, error) {
 	return list, m.err
 }
 
+func TestManager_AddProcess_App_Success(t *testing.T) {
+	sd := &mockSystemd{}
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{}}
+	m := New(store, sd, ng)
+
+	p := Process{Name: "my-go-app", Type: TypeApp, Port: 8080, Entry: "server.go", WorkingDir: "/app", SmokeTestScript: "/smoke.sh"}
+	err := m.AddProcess(context.Background(), p, false)
+	require.NoError(t, err)
+	assert.True(t, sd.createCalled, "CreateUnitFile should be called for app type")
+}
+
+func TestManager_AddProcess_App_WithBuildCmd(t *testing.T) {
+	sd := &mockSystemd{}
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{}}
+	m := New(store, sd, ng)
+
+	dir := t.TempDir()
+	p := Process{Name: "my-go-app", Type: TypeApp, Port: 8080, Entry: "server.go", WorkingDir: dir, BuildCmd: "true", SmokeTestScript: "/smoke.sh"}
+	err := m.AddProcess(context.Background(), p, false)
+	require.NoError(t, err)
+	assert.True(t, sd.createCalled, "CreateUnitFile should be called")
+}
+
+func TestManager_AddProcess_App_BuildCmdFails(t *testing.T) {
+	sd := &mockSystemd{}
+	ng := &mockNginx{}
+	store := &mockStore{processes: map[string]Process{}}
+	m := New(store, sd, ng)
+
+	dir := t.TempDir()
+	p := Process{Name: "my-go-app", Type: TypeApp, Port: 8080, Entry: "server.go", WorkingDir: dir, BuildCmd: "false", SmokeTestScript: "/smoke.sh"}
+	err := m.AddProcess(context.Background(), p, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "build command failed")
+}
+
 func TestManager_AddProcess_Node_Success(t *testing.T) {
 	sd := &mockSystemd{}
 	ng := &mockNginx{}
@@ -425,6 +463,20 @@ func TestUnitContent_WithSmokeTestScript(t *testing.T) {
 	assert.Contains(t, content, "WorkingDirectory=/opt/app/current")
 	assert.Contains(t, content, "ExecStart=/usr/bin/node server.js")
 	assert.Contains(t, content, "EnvironmentFile=/opt/app/shared/.env")
+}
+
+func TestUnitContent_WithCustomCommand(t *testing.T) {
+	p := Process{Name: "my-go-app", Type: TypeApp, WorkingDir: "/app", Command: "/opt/app/bin --port 3000"}
+	content := string(unitContent(p))
+	assert.Contains(t, content, "ExecStart=/opt/app/bin --port 3000")
+	assert.NotContains(t, content, "/usr/bin/node")
+}
+
+func TestUnitContent_CommandOverridesEntry(t *testing.T) {
+	p := Process{Name: "app", Type: TypeApp, WorkingDir: "/app", Entry: "server.js", Command: "/opt/app/bin"}
+	content := string(unitContent(p))
+	assert.Contains(t, content, "ExecStart=/opt/app/bin")
+	assert.NotContains(t, content, "/usr/bin/node")
 }
 
 func TestManager_StartProcess_UnknownType(t *testing.T) {

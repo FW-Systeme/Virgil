@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/chris576/vigil/internal/nginx"
@@ -44,9 +46,13 @@ func (m *Manager) AddProcess(ctx context.Context, p Process, force bool) error {
 	var svcErr error
 
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			svcErr = fmt.Errorf("systemd client not available")
+			break
+		}
+		if err := m.buildApp(ctx, p); err != nil {
+			svcErr = err
 			break
 		}
 		content := unitContent(p)
@@ -94,7 +100,7 @@ func (m *Manager) RemoveProcess(ctx context.Context, name string) error {
 	var firstErr error
 
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd != nil {
 			if err := m.systemd.StopUnit(ctx, name); err != nil && firstErr == nil {
 				firstErr = fmt.Errorf("stopping unit: %w", err)
@@ -145,9 +151,12 @@ func (m *Manager) StartProcess(ctx context.Context, name string) error {
 	}
 
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return fmt.Errorf("systemd client not available")
+		}
+		if err := m.buildApp(ctx, p); err != nil {
+			return err
 		}
 		if err := m.systemd.StartUnit(ctx, name); err != nil {
 			return fmt.Errorf("starting unit: %w", err)
@@ -176,7 +185,7 @@ func (m *Manager) StopProcess(ctx context.Context, name string) error {
 	}
 
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return fmt.Errorf("systemd client not available")
 		}
@@ -207,9 +216,12 @@ func (m *Manager) RestartProcess(ctx context.Context, name string) error {
 	}
 
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return fmt.Errorf("systemd client not available")
+		}
+		if err := m.buildApp(ctx, p); err != nil {
+			return err
 		}
 		if err := m.systemd.RestartUnit(ctx, name); err != nil {
 			return fmt.Errorf("restarting unit: %w", err)
@@ -248,7 +260,7 @@ func (m *Manager) Status(ctx context.Context, name string) (activeState, subStat
 	}
 
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return "", "", fmt.Errorf("systemd client not available")
 		}
@@ -282,7 +294,7 @@ func (m *Manager) Logs(ctx context.Context, name string, lines int, follow bool)
 		return nil, fmt.Errorf("loading process: %w", err)
 	}
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return nil, fmt.Errorf("systemd client not available")
 		}
@@ -304,7 +316,7 @@ func (m *Manager) SetupLogging(ctx context.Context, name string, logPath string,
 		return fmt.Errorf("loading process: %w", err)
 	}
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return fmt.Errorf("systemd client not available")
 		}
@@ -326,7 +338,7 @@ func (m *Manager) RemoveLogging(ctx context.Context, name string) error {
 		return fmt.Errorf("loading process: %w", err)
 	}
 	switch p.Type {
-	case TypeNode:
+	case TypeApp, TypeNode:
 		if m.systemd == nil {
 			return fmt.Errorf("systemd client not available")
 		}
@@ -341,9 +353,26 @@ func (m *Manager) RemoveLogging(ctx context.Context, name string) error {
 	}
 }
 
+func (m *Manager) buildApp(ctx context.Context, p Process) error {
+	if p.BuildCmd == "" {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "sh", "-c", p.BuildCmd)
+	cmd.Dir = p.WorkingDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build command failed: %w", err)
+	}
+	return nil
+}
+
 func unitContent(p Process) []byte {
 	workingDir := p.WorkingDir
-	entry := p.Entry
+	execStart := p.Command
+	if execStart == "" {
+		execStart = "/usr/bin/node " + p.Entry
+	}
 
 	if p.SmokeTestScript != "" {
 		workingDir = filepath.Join(p.WorkingDir, "current")
@@ -359,10 +388,10 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%s
-ExecStart=/usr/bin/node %s
+ExecStart=%s
 Restart=on-failure
 RestartSec=5
-`, p.Name, workingDir, entry)
+`, p.Name, workingDir, execStart)
 
 	if p.EnvFile != "" {
 		content += fmt.Sprintf("EnvironmentFile=%s\n", p.EnvFile)

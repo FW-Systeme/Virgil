@@ -46,7 +46,27 @@ func TestValidate_NegativePort(t *testing.T) {
 
 func TestValidate_NodeMissingEntry(t *testing.T) {
 	p := Process{Name: "app", Type: TypeNode, Port: 3000}
-	assert.ErrorContains(t, p.Validate(), "entry is required for node apps")
+	assert.ErrorContains(t, p.Validate(), "entry or command is required")
+}
+
+func TestValidate_AppWithCommandOnly(t *testing.T) {
+	p := Process{Name: "app", Type: TypeApp, Port: 3000, Command: "/opt/app/bin", SmokeTestScript: "/smoke.sh"}
+	err := p.Validate()
+	require.NoError(t, err)
+}
+
+func TestValidate_AppMissingEntryAndCommand(t *testing.T) {
+	p := Process{Name: "app", Type: TypeApp, Port: 3000}
+	err := p.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "entry or command is required")
+}
+
+func TestIsBackend(t *testing.T) {
+	assert.True(t, Process{Type: TypeApp}.IsBackend())
+	assert.True(t, Process{Type: TypeNode}.IsBackend())
+	assert.False(t, Process{Type: TypeStatic}.IsBackend())
+	assert.False(t, Process{Type: "unknown"}.IsBackend())
 }
 
 func TestValidate_StaticMissingBuildDir(t *testing.T) {

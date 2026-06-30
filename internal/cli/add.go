@@ -21,6 +21,8 @@ func newAddCmd() *cobra.Command {
 	var nginxDomain string
 	var nginxPath string
 	var nginxConfig string
+	var command string
+	var buildCmd string
 	var smokeTestScript string
 	var bundledDeps bool
 
@@ -61,7 +63,7 @@ Examples:
 				return fmt.Errorf("required flag(s) \"port\" not set")
 			}
 
-			return addSingle(cmd, pm, nameArg, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath, nginxConfig, port, force, smokeTestScript, bundledDeps)
+			return addSingle(cmd, pm, nameArg, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath, nginxConfig, command, buildCmd, port, force, smokeTestScript, bundledDeps)
 		},
 	}
 
@@ -77,13 +79,15 @@ Examples:
 	flags.StringVar(&nginxConfig, "nginx-config", "", "Path to custom nginx config file (for static apps, overrides auto-generation)")
 	flags.StringVar(&configFile, "config", "", "Path to ecosystem JSON file")
 	flags.BoolVar(&force, "force", false, "Overwrite existing app")
+	flags.StringVar(&command, "command", "", "Custom ExecStart command (e.g. /opt/app/bin --port 3000)")
+	flags.StringVar(&buildCmd, "build-cmd", "", "Build command to run before start (e.g. go build -o /opt/app/bin .)")
 	flags.StringVar(&smokeTestScript, "smoke-test-script", "", "Path to smoke test script (activates release management)")
 	flags.BoolVar(&bundledDeps, "bundled-deps", false, "Dependencies are included in the package")
 
 	return cmd
 }
 
-func addSingle(cmd *cobra.Command, pm *process.Manager, name, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath, nginxConfig string, port int, force bool, smokeTestScript string, bundledDeps bool) error {
+func addSingle(cmd *cobra.Command, pm *process.Manager, name, appType, entry, buildDir, workingDir, envFile, nginxDomain, nginxPath, nginxConfig, command, buildCmd string, port int, force bool, smokeTestScript string, bundledDeps bool) error {
 	p := process.Process{
 		Name:            name,
 		Type:            process.Type(appType),
@@ -95,6 +99,8 @@ func addSingle(cmd *cobra.Command, pm *process.Manager, name, appType, entry, bu
 		NginxDomain:     nginxDomain,
 		NginxPath:       nginxPath,
 		NginxConfig:     nginxConfig,
+		Command:         command,
+		BuildCmd:        buildCmd,
 		CreatedAt:       time.Now(),
 		Enabled:         true,
 		SmokeTestScript: smokeTestScript,
