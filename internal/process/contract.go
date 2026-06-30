@@ -15,20 +15,19 @@ const (
 )
 
 type Process struct {
-	Name         string    `json:"name"`
-	Type         Type      `json:"type"`
-	Port         int       `json:"port"`
-	Entry        string    `json:"entry,omitempty"`
-	BuildDir     string    `json:"build_dir,omitempty"`
-	EnvFile      string    `json:"env_file,omitempty"`
-	WorkingDir   string    `json:"working_dir,omitempty"`
-	NginxDomain  string    `json:"nginx_domain,omitempty"`
-	NginxPath    string    `json:"nginx_path,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	Enabled      bool      `json:"enabled"`
-	UpdateScript string    `json:"update_script,omitempty"`
-	IncomingDir  string    `json:"incoming_dir,omitempty"`
-	KeepReleases int       `json:"keep_releases,omitempty"`
+	Name            string    `json:"name"`
+	Type            Type      `json:"type"`
+	Port            int       `json:"port"`
+	Entry           string    `json:"entry,omitempty"`
+	BuildDir        string    `json:"build_dir,omitempty"`
+	EnvFile         string    `json:"env_file,omitempty"`
+	WorkingDir      string    `json:"working_dir,omitempty"`
+	NginxDomain     string    `json:"nginx_domain,omitempty"`
+	NginxPath       string    `json:"nginx_path,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	Enabled         bool      `json:"enabled"`
+	SmokeTestScript string    `json:"smoke_test_script,omitempty"`
+	BundledDeps     bool      `json:"bundled_deps,omitempty"`
 }
 
 func (p Process) Validate() error {
@@ -46,6 +45,9 @@ func (p Process) Validate() error {
 	}
 	if p.Type == TypeStatic && p.BuildDir == "" {
 		return fmt.Errorf("build_dir is required for static apps")
+	}
+	if p.SmokeTestScript == "" {
+		return fmt.Errorf("smoke_test_script is required")
 	}
 	return nil
 }
