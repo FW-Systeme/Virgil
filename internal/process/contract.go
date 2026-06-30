@@ -10,6 +10,7 @@ import (
 type Type string
 
 const (
+	TypeApp    Type = "app"
 	TypeNode   Type = "node"
 	TypeStatic Type = "static"
 )
@@ -25,6 +26,8 @@ type Process struct {
 	NginxDomain     string    `json:"nginx_domain,omitempty"`
 	NginxPath       string    `json:"nginx_path,omitempty"`
 	NginxConfig     string    `json:"nginx_config,omitempty"`
+	Command         string    `json:"command,omitempty"`
+	BuildCmd        string    `json:"build_cmd,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	Enabled         bool      `json:"enabled"`
 	SmokeTestScript string    `json:"smoke_test_script,omitempty"`
@@ -35,14 +38,14 @@ func (p Process) Validate() error {
 	if p.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if p.Type != TypeNode && p.Type != TypeStatic {
-		return fmt.Errorf("type must be %q or %q", TypeNode, TypeStatic)
+	if p.Type != TypeApp && p.Type != TypeNode && p.Type != TypeStatic {
+		return fmt.Errorf("type must be %q, %q, or %q", TypeApp, TypeNode, TypeStatic)
 	}
 	if p.Port <= 0 {
 		return fmt.Errorf("port must be a positive integer")
 	}
-	if p.Type == TypeNode && p.Entry == "" {
-		return fmt.Errorf("entry is required for node apps")
+	if p.IsBackend() && p.Entry == "" && p.Command == "" {
+		return fmt.Errorf("entry or command is required for app/node type")
 	}
 	if p.Type == TypeStatic && p.BuildDir == "" {
 		return fmt.Errorf("build_dir is required for static apps")
@@ -51,6 +54,11 @@ func (p Process) Validate() error {
 		return fmt.Errorf("smoke_test_script is required")
 	}
 	return nil
+}
+
+// IsBackend returns true if the process is a backend type (app or node).
+func (p Process) IsBackend() bool {
+	return p.Type == TypeApp || p.Type == TypeNode
 }
 
 type EcosystemFile struct {

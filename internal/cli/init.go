@@ -16,12 +16,12 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Generate an ecosystem.json template",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tmpl := process.Process{
-				Name:    "my-app",
-				Type:    process.TypeNode,
-				Entry:   "./app.js",
-				Port:    3000,
-			}
+		tmpl := process.Process{
+			Name:    "my-app",
+			Type:    process.TypeApp,
+			Entry:   "./app.js",
+			Port:    3000,
+		}
 
 			data, err := json.MarshalIndent(tmpl, "", "  ")
 			if err != nil {
